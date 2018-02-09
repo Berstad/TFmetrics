@@ -1,0 +1,10 @@
+# Created by .ignore support plugin (hsz.mobi)
+.gitignore
+.idea/
+TFmetrics.iml
+server/database/
+server/datasets/
+server/metrics/
+server/server.iml
+server/virtualenv/
+static/
