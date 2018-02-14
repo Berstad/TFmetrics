@@ -110,13 +110,13 @@ def plot_history(combine, figname, filepath, verbose, library, save=True, show=T
     met_index = 0
     num_epochs = 0
     if combine:
-        fig = plt.figure(1,figsize=(20, 15), dpi=80)
+        fig = plt.figure(1,figsize=(20, 16), dpi=80)
     for metric in metrics.keys():
         if verbose:
             print("Current metric: ",metric)
         x = np.arange(0,len(metrics[metric]),1)
         if combine:
-            plt.subplot(4,5,met_index+1)
+            plt.subplot(5,5,met_index+1)
         if verbose:
             num_epochs = len(metrics[metric])
             print("Number of epochs: ", num_epochs)
@@ -163,7 +163,7 @@ if __name__ == '__main__':
     pass
     network_name = "kvasir"
     type = "multiclass"
-    session = "batchsize-32_val-acc_val-loss"
+    session = "batchsize-64_val-acc_val-loss"
     save_figures = True
     show_figures = True
     rootdir = "/metrics/storage/sessions/" + session

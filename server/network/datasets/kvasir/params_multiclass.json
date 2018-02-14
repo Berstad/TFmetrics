@@ -12,12 +12,13 @@
   "loss": "categorical_crossentropy",
   "train_data_dir": "/datasets/kvasir/training",
   "validation_data_dir": "/datasets/kvasir/validation",
+  "test_data_dir": "/datasets/kvasir/validation",
   "model_dir": "/model/kvasir/",
   "nb_train_samples": 4000,
   "nb_validation_samples": 4000,
   "monitor_checkpoint": "val_acc",
   "monitor_stopping": "val_loss",
-  "patience": 5,
+  "patience" : 5,
   "nadam_beta_1" : 0.9,
   "nadam_beta_2" : 0.999
 }

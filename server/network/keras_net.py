@@ -9,16 +9,19 @@ __status__ = "Development"
 # file 'LICENSE.md', which is part of this source code package.
 
 from keras.applications.xception import Xception
-from keras.models import Model
+from keras.models import Model, load_model
 from keras.layers import Dense, GlobalAveragePooling2D
 from keras.preprocessing.image import ImageDataGenerator
 from keras.callbacks import ModelCheckpoint
+from keras import optimizers
 from collections import Counter
 import os
 from keras.callbacks import EarlyStopping
+from sklearn import metrics
 import keras
 import sys
 import time
+import numpy as np
 
 # From https://stackoverflow.com/questions/43178668/record-the-computation-time-for-each-epoch-in-keras-during-model-fit
 class TimeHistory(keras.callbacks.Callback):
@@ -50,10 +53,10 @@ class KerasNet:
     final_weights_path = ""
     train_data_dir = ""
     validation_data_dir = ""
+    test_data_dir = ""
     model_dir = ""
+    optimizer = False
     calls = []
-
-
 
     def __init__(self,paramdict_in,verbose_in = False,calls=[]):
         #the base model
@@ -61,6 +64,12 @@ class KerasNet:
         self.paramdict = paramdict_in
         self.calls = calls
         try:
+            if self.paramdict["optimizer"] == "nadam":
+                self.optimizer = optimizers.Nadam(lr=self.paramdict["learn_rate"],
+                                                  beta_1=self.paramdict["nadam_beta_1"],
+                                                  beta_2=self.paramdict["nadam_beta_2"])
+            else:
+                self.optimizer = optimizers.Nadam()
             self.base_model = Xception(input_shape=(self.paramdict['imagedims'][0], self.paramdict['imagedims'][1], 3),
                                   weights='imagenet', include_top=False)
             # Top Model Block
@@ -73,6 +82,7 @@ class KerasNet:
 
             self.train_data_dir = os.path.dirname(os.path.abspath(__file__)) + self.paramdict["train_data_dir"]
             self.validation_data_dir = os.path.dirname(os.path.abspath(__file__)) + self.paramdict["validation_data_dir"]
+            self.test_data_dir = os.path.dirname(os.path.abspath(__file__)) + self.paramdict["test_data_dir"]
             self.model_dir = os.path.dirname(os.path.abspath(__file__)) + self.paramdict["model_dir"]
 
             if self.verbose:
@@ -83,6 +93,11 @@ class KerasNet:
             e = sys.exc_info()[0]
             print("Error: ",e)
 
+    def load_model(self,path):
+        self.model = load_model(path)
+
+    def save_model(self,path):
+        self.model.save(path)
 
     #weight function for imbalanced datasets
     def get_class_weights(self,y):
@@ -136,7 +151,7 @@ class KerasNet:
     def compile_setup(self,metrics):
         # Compile the model
         self.metrics = metrics
-        self.model.compile(self.paramdict['optimizer'],
+        self.model.compile(self.optimizer,
                       loss=self.paramdict['loss'],  # categorical_crossentropy if multi-class classifier
                       metrics=self.metrics)
 
@@ -175,7 +190,7 @@ class KerasNet:
 
         # compile the model with a SGD/momentum optimizer
         # and a very slow learning rate.
-        self.model.compile(self.paramdict['optimizer'],
+        self.model.compile(self.optimizer,
                            loss=self.paramdict['loss'],
                            metrics=self.metrics)
 
@@ -191,12 +206,24 @@ class KerasNet:
                                 validation_data=self.validation_generator,
                                 validation_steps=self.paramdict['nb_validation_samples'] // self.paramdict['batch_size'],
                                 callbacks=self.callbacks_list)
-    def test(self):
-        scores = self.model.evaluate(self.validation_generator)
-        if self.verbose:
-            print('Test loss:', scores[0])
-            print('Test accuracy:', scores[1])
-        return scores
+    def test(self,testmode="scikit"):
+        if testmode == "scikit":
+            self.test_generator = ImageDataGenerator()
+            self.test_data_generator = self.test_generator.flow_from_directory(self.test_data_dir,
+                                                                                    target_size=(self.paramdict['imagedims'][0],
+                                                                                                 self.paramdict['imagedims'][1]),
+                                                                                    batch_size=self.paramdict['batch_size'],
+                                                                                    class_mode='categorical')
+            test_steps_per_epoch = np.math.ceil(self.test_data_generator.samples / self.test_data_generator.batch_size)
+            test_predictions = self.model.predict_generator(self.test_data_generator,steps=test_steps_per_epoch)
+            predicted_classes = np.argmax(test_predictions,axis=1)
+            true_classes = self.test_data_generator.classes
+            class_labels = list(self.test_data_generator.class_indices.keys())
+            report = metrics.classification_report(true_classes, predicted_classes, target_names=class_labels)
+        else:
+
+            report = ""
+        return report
 
 
 if __name__ == '__main__':

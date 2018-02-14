@@ -1,4 +1,4 @@
-#source \virtualenv\TFmetrics\bin\activate
+# source \virtualenv\TFmetrics\bin\activate
 
 """server.py: Runs as a wrapper for a Keras Neural net, and logs metrics about it"""
 
@@ -30,6 +30,10 @@ type = "multiclass"
 session = "batchsize-64_val-acc_val-loss"
 save_figures = True
 show_figures = True
+save_model = True
+setup = True
+train = True
+fine_tune = True
 
 @app.route('/')
 
@@ -86,7 +90,7 @@ def setup_network():
     net = KerasNet(params,True,callbacks)
     metrics = ['accuracy', kermet.fmeasure, kermet.recall, kermet.precision,
                kermet.matthews_correlation, kermet.true_pos,
-               kermet.true_neg, kermet.false_pos, kermet.false_neg]
+               kermet.true_neg, kermet.false_pos, kermet.false_neg, kermet.specificity]
     if net.setup_completed:
         net.gen_data()
         net.compile_setup(metrics)
@@ -134,23 +138,31 @@ def run_with_monitors(monitors=[],params = {}):
         for t in threads:
             t.do_run = False
 
-        # threads = []
-        # phase = "test"
-        # for monitor in monitors:
-        #     thr = threading.Thread(target=monitor.start_monitoring,args=(params,phase,session))
-        #     thr.deamon = True
-        #     thr.do_run = True
-        #     thr.start()
-        #     threads.append(thr)
-        # score = net.test()
-        # save_times(time_callback,"times_"+phase+"_"+session+".json")
-        # for t in threads:
-        #     t.do_run = False
+        threads = []
+        phase = "test"
+        for monitor in monitors:
+            thr = threading.Thread(target=monitor.start_monitoring,args=(params,phase,session))
+            thr.deamon = True
+            thr.do_run = True
+            thr.start()
+            threads.append(thr)
+        report = net.test(testmode="scikit")
+        #report = net.test(testmode="custom")
+        save_report(report, "report_"+phase+".txt")
+        save_times(time_callback,"times_"+phase+"_"+session+".json")
+        for t in threads:
+            t.do_run = False
+        net.save_model(path=)
 
 def save_history(hist,name):
     dir = os.path.dirname(os.path.abspath(__file__)) + '/metrics/storage/sessions/' + session + "/kerasmon/"
     with open(dir + name, 'w') as f:
         json.dump(hist.history, f)
+
+def save_report(report,name):
+    dir = os.path.dirname(os.path.abspath(__file__)) + '/metrics/storage/sessions/' + session + "/kerasmon/"
+    with open(dir + name, 'w') as f:
+        f.write(report)
 
 def save_times(time_callback,name):
     dir = os.path.dirname(os.path.abspath(__file__)) + '/metrics/storage/sessions/' + session + "/kerasmon/"
@@ -160,6 +172,7 @@ def save_times(time_callback,name):
 def ensure_session_storage():
     directory = os.path.dirname(os.path.abspath(__file__)) + '/metrics/storage/sessions/' + session + "/"
     if not os.path.exists(directory):
+        print("Folders did not exist")
         os.makedirs(directory + "nvmon/figures/")
         os.makedirs(directory + "psmon/figures/")
         os.makedirs(directory + "tpmon/figures/")
@@ -212,11 +225,17 @@ if __name__ == '__main__':
     testplotter.plot_json(True,"GPU Usage Fine Tune",
                           rootdir + "/nvmon/fine_tune.json",
                           0.5, True, gpu_specsdir, "nvmon", save_figures, show_figures, session)
+    testplotter.plot_json(True,"GPU Usage Test",
+                          rootdir + "/nvmon/test.json",
+                          0.5, True, gpu_specsdir, "nvmon", save_figures, show_figures, session)
     testplotter.plot_json(True, "System Usage Train",
                           rootdir + "/psmon/train.json",
                           0.5, True, sys_specsdir, "psmon", save_figures, show_figures, session)
     testplotter.plot_json(True, "System Usage Fine Tune",
                           rootdir + "/psmon/fine_tune.json",
+                          0.5, True, sys_specsdir, "psmon", save_figures, show_figures, session)
+    testplotter.plot_json(True, "System Usage Test",
+                          rootdir + "/psmon/test.json",
                           0.5, True, sys_specsdir, "psmon", save_figures, show_figures, session)
     testplotter.plot_history(True, "Network History Train",
                              rootdir + "/kerasmon/hist_train.json",

@@ -213,7 +213,8 @@ fscore = f1score = fmeasure
 '''ADDED METHODS BELOW'''
 '''Specificity (SPEC) This metric is frequently called the true negative rate,
     and shows the ratio of negatives that are correctly identified as such
-    (e.g., the fraction of frames without an endoscopic finding are correctly identified as a negative result).'''
+    (e.g., the fraction of frames without an endoscopic finding are correctly identified as a negative result).
+    TODO: '''
 def specificity(y_true,y_pred):
     y_pred_pos = K.round(K.clip(y_pred, 0, 1))
     y_pred_neg = 1 - y_pred_pos
@@ -221,10 +222,7 @@ def specificity(y_true,y_pred):
     y_neg = 1 - y_pos
     tn = K.sum(y_neg * y_pred_neg)
     fp = K.sum(y_neg * y_pred_pos)
-    if (tn+fp) > 0:
-        spec= tn/(tn+fp)
-    else:
-        spec = 0
+    spec = tn/(tn+fp)
     return spec
 
 '''True positive rate'''
@@ -258,3 +256,13 @@ def false_neg(y_true,y_pred):
     y_pos = K.round(K.clip(y_true, 0, 1))
     fn = K.sum(y_pos * y_pred_neg)
     return fn
+
+'''Non-keras method: Used for test'''
+def misc_measures(tp, tn, fp, fn):
+    accuracy=(float(tp+tn)/float(tp+tn+fp+fn)) if (tp+tn+fp+fn) > 0 else 0.
+    recall=(float(tp)/float(tp+fn)) if (tp+fn) > 0 else 0.
+    specificity=(float(tn)/float(tn+fp)) if (tn+fp) > 0 else 0.
+    precision=(float(tp)/float(tp+fp)) if (tp+fp) > 0 else 0.
+    f1=(float(2*tp)/float(2*tp+fp+fn)) if (2*tp+fp+fn) > 0 else 0.
+    mcc=(float(tp*tn-fp*fn)/math.sqrt(float(tp+fp)*float(tp+fn)*float(tn+fp)*float(tn+fn))) if (float(tp+fp)*float(tp+fn)*float(tn+fp)*float(tn+fn)) > 0 else 0.
+    return tp, tn, fp, fn, recall, specificity, precision, accuracy, f1, mcc
