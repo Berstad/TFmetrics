@@ -1,6 +1,6 @@
 {
   "activation": "softmax",
-  "nb_classes": 9,
+  "nb_classes": 8,
   "based_model_last_block_layer_number": 126,
   "imagedims": [299,299],
   "batch_size": 64,
@@ -10,9 +10,12 @@
   "transformation_ratio": 0.05,
   "optimizer": "nadam",
   "loss": "categorical_crossentropy",
-  "train_data_dir": "/datasets/kvasir-nerthus-combined/training",
-  "validation_data_dir": "/datasets/kvasir-nerthus-combined/validation",
-  "model_dir": "/model/kvasir-nerthus-combined/",
-  "nb_train_samples": 7100,
-  "nb_validation_samples": 2250
+  "train_data_dir": "/datasets/kvasir/training",
+  "validation_data_dir": "/datasets/kvasir/validation",
+  "model_dir": "/model/kvasir/",
+  "nb_train_samples": 4000,
+  "nb_validation_samples": 4000,
+  "monitor_checkpoint": "val_acc",
+  "monitor_stopping": "val_loss",
+  "patience": 5
 }

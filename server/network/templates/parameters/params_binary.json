@@ -14,5 +14,8 @@
   "validation_data_dir": "/datasets/kvasir-nerthus-combined/validation",
   "model_dir": "/model/kvasir-nerthus-combined/",
   "nb_train_samples": 7100,
-  "nb_validation_samples": 2250
+  "nb_validation_samples": 2250,
+  "monitor_checkpoint": "val_acc",
+  "monitor_stopping": "val_loss",
+  "patience": 5
 }

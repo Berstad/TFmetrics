@@ -16,7 +16,23 @@ from keras.callbacks import ModelCheckpoint
 from collections import Counter
 import os
 from keras.callbacks import EarlyStopping
+import keras
 import sys
+import time
+
+# From https://stackoverflow.com/questions/43178668/record-the-computation-time-for-each-epoch-in-keras-during-model-fit
+class TimeHistory(keras.callbacks.Callback):
+    def on_train_begin(self, logs={}):
+        self.times = []
+
+    def on_epoch_begin(self, batch, logs={}):
+        self.epoch_time_start = int(round(time.time() * 1000))
+
+    def on_epoch_end(self, batch, logs={}):
+        self.times.append({
+                            "start" : self.epoch_time_start,
+                            "end" : int(round(time.time() * 1000))
+                          })
 
 class KerasNet:
     base_model = False
@@ -29,18 +45,21 @@ class KerasNet:
     callbacks_list = False
     paramdict = False
     setup_completed = False
+    metrics = False
     top_weights_path = ""
     final_weights_path = ""
     train_data_dir = ""
     validation_data_dir = ""
     model_dir = ""
+    calls = []
 
 
 
-    def __init__(self,paramdict_in,verbose_in = False):
+    def __init__(self,paramdict_in,verbose_in = False,calls=[]):
         #the base model
         self.verbose = verbose_in
         self.paramdict = paramdict_in
+        self.calls = calls
         try:
             self.base_model = Xception(input_shape=(self.paramdict['imagedims'][0], self.paramdict['imagedims'][1], 3),
                                   weights='imagenet', include_top=False)
@@ -59,7 +78,7 @@ class KerasNet:
             if self.verbose:
                 print(self.model.summary())
                 print("Initilialization complete")
-                self.setup_completed = True
+            self.setup_completed = True
         except:
             e = sys.exc_info()[0]
             print("Error: ",e)
@@ -114,21 +133,22 @@ class KerasNet:
                                                                                 batch_size=self.paramdict['batch_size'],
                                                                                 class_mode='categorical')
 
-    def compile_setup(self):
+    def compile_setup(self,metrics):
         # Compile the model
+        self.metrics = metrics
         self.model.compile(self.paramdict['optimizer'],
                       loss=self.paramdict['loss'],  # categorical_crossentropy if multi-class classifier
-                      metrics=['accuracy'])
+                      metrics=self.metrics)
 
         self.top_weights_path = os.path.join(self.model_dir, 'top_model_weights.hdf5')
         self.callbacks_list = [
-            ModelCheckpoint(self.top_weights_path, monitor='val_acc', verbose=1, save_best_only=True),
-            EarlyStopping(monitor='val_acc', patience=5, verbose=0)
-        ]
+            ModelCheckpoint(self.top_weights_path, monitor=self.paramdict['monitor_checkpoint'], verbose=1, save_best_only=True),
+            EarlyStopping(monitor=self.paramdict['monitor_stopping'], patience=self.paramdict['patience'], verbose=0),
+        ] + self.calls
 
     def train(self):
         # Train Simple CNN
-        self.model.fit_generator(self.train_generator,
+         return self.model.fit_generator(self.train_generator,
                                  steps_per_epoch=self.paramdict['nb_train_samples'] // self.paramdict['batch_size'],
                                  epochs=self.paramdict['nb_epoch'] / 5,
                                  validation_data=self.validation_generator,
@@ -155,22 +175,29 @@ class KerasNet:
 
         # compile the model with a SGD/momentum optimizer
         # and a very slow learning rate.
-        self.model.compile(optimizer='nadam',
-                           loss='categorical_crossentropy',
-                           metrics=['accuracy'])
+        self.model.compile(self.paramdict['optimizer'],
+                           loss=self.paramdict['loss'],
+                           metrics=self.metrics)
 
         # save weights of best training epoch: monitor either val_loss or val_acc
         self.final_weights_path = os.path.join(self.model_dir, 'model_weights.hdf5')
         self.callbacks_list = [
-            ModelCheckpoint(self.final_weights_path, monitor='val_acc', verbose=1, save_best_only=True),
-            EarlyStopping(monitor='val_loss', patience=5, verbose=0)
-        ]
-        self.model.fit_generator(self.train_generator,
+            ModelCheckpoint(self.top_weights_path, monitor=self.paramdict['monitor_checkpoint'], verbose=1, save_best_only=True),
+            EarlyStopping(monitor=self.paramdict['monitor_stopping'], patience=self.paramdict['patience'], verbose=0)
+        ] + self.calls
+        return self.model.fit_generator(self.train_generator,
                                 steps_per_epoch=self.paramdict['nb_train_samples'] // self.paramdict['batch_size'],
                                 epochs=self.paramdict['nb_epoch'],
                                 validation_data=self.validation_generator,
                                 validation_steps=self.paramdict['nb_validation_samples'] // self.paramdict['batch_size'],
                                 callbacks=self.callbacks_list)
+    def test(self):
+        scores = self.model.evaluate(self.validation_generator)
+        if self.verbose:
+            print('Test loss:', scores[0])
+            print('Test accuracy:', scores[1])
+        return scores
+
 
 if __name__ == '__main__':
     print("This program is not meant to be run as is, run using server.py as wrapper")
