@@ -9,6 +9,7 @@ __status__ = "Development"
 # file 'LICENSE.md', which is part of this source code package.
 
 from keras.applications.xception import Xception
+from keras.applications.inception_v3 import InceptionV3
 from keras.models import Model, load_model
 from keras.layers import Dense, GlobalAveragePooling2D
 from keras.preprocessing.image import ImageDataGenerator
@@ -22,6 +23,8 @@ import keras
 import sys
 import time
 import numpy as np
+import network.packages.images.loadimg as loadimg
+import math
 
 # From https://stackoverflow.com/questions/43178668/record-the-computation-time-for-each-epoch-in-keras-during-model-fit
 class TimeHistory(keras.callbacks.Callback):
@@ -93,11 +96,15 @@ class KerasNet:
             e = sys.exc_info()[0]
             print("Error: ",e)
 
-    def load_model(self,path):
+    def load_model(self, path):
         self.model = load_model(path)
+        if self.verbose:
+            print("Model loaded!")
 
-    def save_model(self,path):
+    def save_model(self, path):
         self.model.save(path)
+        if self.verbose:
+            print("Model saved!")
 
     #weight function for imbalanced datasets
     def get_class_weights(self,y):
@@ -139,8 +146,9 @@ class KerasNet:
         # use the above 3 commented lines if you want to save and look at how the data augmentations look like
         # TODO: Look at this, it seems wrong
         if save_preview:
-            os.makedirs(os.path.join(self.train_data_dir, '../preview'), exist_ok=True)
-            self.model.save_to_dir(os.path.join(self.train_data_dir, '../preview'), save_prefix='aug', save_format='jpeg')
+            dir = os.path.dirname(os.path.abspath(__file__))  + self.paramdict["model_dir"] + "/preview/"
+            os.makedirs(dir, exist_ok=True)
+            self.model.save_to_dir(dir, save_prefix='aug', save_format='jpeg')
 
         self.validation_generator = self.validation_datagen.flow_from_directory(self.validation_data_dir,
                                                                                 target_size=(self.paramdict['imagedims'][0],
@@ -206,6 +214,12 @@ class KerasNet:
                                 validation_data=self.validation_generator,
                                 validation_steps=self.paramdict['nb_validation_samples'] // self.paramdict['batch_size'],
                                 callbacks=self.callbacks_list)
+
+    def load_test_data(self):
+        self.x_data,self.y_data,self.classes = loadimg.getimagedataandlabels(self.test_data_dir,
+                                                                             self.paramdict['imagedims'][0],
+                                                                             self.paramdict['imagedims'][1])
+
     def test(self,testmode="scikit"):
         if testmode == "scikit":
             self.test_generator = ImageDataGenerator()
@@ -220,11 +234,68 @@ class KerasNet:
             true_classes = self.test_data_generator.classes
             class_labels = list(self.test_data_generator.class_indices.keys())
             report = metrics.classification_report(true_classes, predicted_classes, target_names=class_labels)
-        else:
+            return report
+        elif testmode == "custom":
+            # test_predictions = []
+            # for i in range(len(self.x_data)):
+            #     x_l = np.expand_dims(self.x_data[i], axis=0)
+            #     current = self.model.predict(x_l,verbose=0)
+            #     test_predictions.append(current[0])
+            #     # if self.verbose:
+            #     #     print("Predicted sample " + str(i) + " as class " + str(test_predictions[i]))
+            test_predictions = self.model.predict(self.x_data)
+            if self.verbose:
+                print("Predictions completed")
+            return test_predictions
 
-            report = ""
+
+    def score_test(self,test_predictions):
+        tp = 0 # pred = y_data = !normal
+        tn = 0 # pred = y_data = normal
+        fp = 0 # pred != y_data = !normal
+        fn = 0 # pred != y_data = normal
+        total_per_class = np.zeros(len(self.classes))
+        predicted = np.argmax(test_predictions,axis=1)
+        y_data_conv = []
+        for i in range(len(predicted)):
+            total_per_class[predicted[i]] += 1
+            y_data_conv.append(self.classes.index(self.y_data[i]))
+            if "normal" not in self.y_data[i]:
+                if predicted[i] == self.classes.index(self.y_data[i]):
+                    tp += 1
+                else:
+                    fp += 1
+            else:
+                if predicted[i] == self.classes.index(self.y_data[i]):
+                    tn += 1
+                else:
+                    fn += 1
+        tp,tn,fp,fn,recall,specificity, precision, accuracy, f1, mcc = misc_measures(tp,tn,fp,fn)
+        conf_mat = metrics.confusion_matrix(predicted,y_data_conv)
+        report = "Classes: " + str(self.classes) + "\n" \
+                 + "True Pos: " + str(tp) + "\n" \
+                 + "True Neg: " + str(tn) + "\n" \
+                 + "False Pos: " + str(fp) + "\n" \
+                 + "False Neg: " + str(fn) + "\n" \
+                 + "Recall: " + str(recall) + "\n" \
+                 + "Specificity: " + str(specificity) + "\n" \
+                 + "Precision: " + str(precision) + "\n" \
+                 + "Accuracy: " + str(accuracy) + "\n" \
+                 + "F1 measure: " + str(f1) + "\n" \
+                 + "MCC: " + str(mcc) + "\n" \
+                 + "Totals per class: " + np.array_str(total_per_class) + "\n" \
+                 + "Confusion matrix:\n " + np.array_str(conf_mat)
         return report
 
+'''Non-keras method: Used for test'''
+def misc_measures(tp, tn, fp, fn):
+    accuracy=(float(tp+tn)/float(tp+tn+fp+fn)) if (tp+tn+fp+fn) > 0 else 0.
+    recall=(float(tp)/float(tp+fn)) if (tp+fn) > 0 else 0.
+    specificity=(float(tn)/float(tn+fp)) if (tn+fp) > 0 else 0.
+    precision=(float(tp)/float(tp+fp)) if (tp+fp) > 0 else 0.
+    f1=(float(2*tp)/float(2*tp+fp+fn)) if (2*tp+fp+fn) > 0 else 0.
+    mcc=(float(tp*tn-fp*fn)/math.sqrt(float(tp+fp)*float(tp+fn)*float(tn+fp)*float(tn+fn))) if (float(tp+fp)*float(tp+fn)*float(tn+fp)*float(tn+fn)) > 0 else 0.
+    return tp, tn, fp, fn, recall, specificity, precision, accuracy, f1, mcc
 
 if __name__ == '__main__':
     print("This program is not meant to be run as is, run using server.py as wrapper")

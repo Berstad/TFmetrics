@@ -27,13 +27,16 @@ import sys
 app = Flask(__name__)
 network_name = "kvasir"
 type = "multiclass"
-session = "batchsize-64_val-acc_val-loss"
+session = "2018-02-16_patience-0_new-tests"
+testmode = "custom"
 save_figures = True
 show_figures = True
-save_model = True
+save_model = False # This may break things?
+save_preview = False
 setup = True
-train = True
-fine_tune = True
+train = True # Set false to load earlier model
+fine_tune = True # Set false to load earlier model
+test = True
 
 @app.route('/')
 
@@ -88,11 +91,11 @@ def setup_network():
     time_callback = TimeHistory()
     callbacks = [time_callback]
     net = KerasNet(params,True,callbacks)
-    metrics = ['accuracy', kermet.fmeasure, kermet.recall, kermet.precision,
-               kermet.matthews_correlation, kermet.true_pos,
-               kermet.true_neg, kermet.false_pos, kermet.false_neg, kermet.specificity]
+    metrics = ['accuracy'] #kermet.fmeasure, kermet.recall, kermet.precision,
+               #kermet.matthews_correlation, kermet.true_pos,
+               #kermet.true_neg, kermet.false_pos, kermet.false_neg, kermet.specificity]
     if net.setup_completed:
-        net.gen_data()
+        net.gen_data(save_preview=save_preview)
         net.compile_setup(metrics)
     return net, time_callback
 
@@ -110,49 +113,56 @@ def run_with_monitors(monitors=[],params = {}):
     #     t.do_run = False
     if net.setup_completed:
         print("Setup completed")
-        threads = []
-        phase = "train"
-        for monitor in monitors:
-            thr = threading.Thread(target=monitor.start_monitoring,args=(params,phase,session))
-            thr.deamon = True
-            thr.do_run = True
-            thr.start()
-            threads.append(thr)
-        hist = net.train()
-        save_history(hist,"hist_"+phase+".json")
-        save_times(time_callback,"times_"+phase+".json")
-        for t in threads:
-            t.do_run = False
+        if train:
+            threads = []
+            phase = "train"
+            for monitor in monitors:
+                thr = threading.Thread(target=monitor.start_monitoring,args=(params,phase,session))
+                thr.deamon = True
+                thr.do_run = True
+                thr.start()
+                threads.append(thr)
+            hist = net.train()
+            save_history(hist,"hist_"+phase+".json")
+            save_times(time_callback,"times_"+phase+".json")
+            for t in threads:
+                t.do_run = False
 
-        threads = []
-        phase = "fine_tune"
-        for monitor in monitors:
-            thr = threading.Thread(target=monitor.start_monitoring,args=(params,phase,session))
-            thr.deamon = True
-            thr.do_run = True
-            thr.start()
-            threads.append(thr)
-        hist = net.fine_tune()
-        save_history(hist,"hist_"+phase+".json")
-        save_times(time_callback,"times_"+phase+".json")
-        for t in threads:
-            t.do_run = False
+        if fine_tune:
+            threads = []
+            phase = "fine_tune"
+            for monitor in monitors:
+                thr = threading.Thread(target=monitor.start_monitoring,args=(params,phase,session))
+                thr.deamon = True
+                thr.do_run = True
+                thr.start()
+                threads.append(thr)
+            hist = net.fine_tune()
+            save_history(hist,"hist_"+phase+".json")
+            save_times(time_callback,"times_"+phase+".json")
+            for t in threads:
+                t.do_run = False
+            if save_model:
+                net.save_model(os.path.dirname(os.path.abspath(__file__)) + "/network/model/" + network_name + "/model.h5")
 
-        threads = []
-        phase = "test"
-        for monitor in monitors:
-            thr = threading.Thread(target=monitor.start_monitoring,args=(params,phase,session))
-            thr.deamon = True
-            thr.do_run = True
-            thr.start()
-            threads.append(thr)
-        report = net.test(testmode="scikit")
-        #report = net.test(testmode="custom")
-        save_report(report, "report_"+phase+".txt")
-        save_times(time_callback,"times_"+phase+"_"+session+".json")
-        for t in threads:
-            t.do_run = False
-        net.save_model(path=)
+        if test:
+            threads = []
+            phase = "test"
+            if not train or not fine_tune:
+                net.load_model(os.path.dirname(os.path.abspath(__file__)) + "/network/model/" + network_name + "/model.h5")
+            net.load_test_data()
+            for monitor in monitors:
+                thr = threading.Thread(target=monitor.start_monitoring,args=(params,phase,session))
+                thr.deamon = True
+                thr.do_run = True
+                thr.start()
+                threads.append(thr)
+            predictions = net.test(testmode=testmode)
+            #save_times(time_callback,"times_"+phase+"_"+session+".json")
+            for t in threads:
+                t.do_run = False
+            report = net.score_test(predictions)
+            save_report(report, "report_"+phase+".txt")
 
 def save_history(hist,name):
     dir = os.path.dirname(os.path.abspath(__file__)) + '/metrics/storage/sessions/' + session + "/kerasmon/"

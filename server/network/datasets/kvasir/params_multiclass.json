@@ -18,7 +18,7 @@
   "nb_validation_samples": 4000,
   "monitor_checkpoint": "val_acc",
   "monitor_stopping": "val_loss",
-  "patience" : 5,
+  "patience" : 0,
   "nadam_beta_1" : 0.9,
   "nadam_beta_2" : 0.999
 }
