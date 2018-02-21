@@ -23,20 +23,22 @@ import metrics.met_keras as kermet
 import threading
 import testplotter
 import sys
+import numpy as np
 
 app = Flask(__name__)
 network_name = "kvasir"
 type = "multiclass"
-session = "2018-02-16_patience-0_new-tests"
+session = "2018-02-21_multitest"
 testmode = "custom"
 save_figures = True
 show_figures = True
-save_model = False # This may break things?
+save_model = True # This may break things?
 save_preview = False
 setup = True
-train = True # Set false to load earlier model
-fine_tune = True # Set false to load earlier model
+train = False # Set false to load earlier model
+fine_tune = False # Set false to load earlier model
 test = True
+verbose_level = 1
 
 @app.route('/')
 
@@ -69,14 +71,9 @@ def get_params(network="multiclass", database = False):
     # nb_validation_samples = samples in validation data
     paramdict = {}
     if not database:
-        if network == "multiclass":
-            with open(os.path.dirname(os.path.abspath(__file__)) +
-                      "/network/datasets/"+ network_name + "/params_multiclass.json") as json_data:
-                paramdict = json.load(json_data)
-        elif network == "binary":
-            with open(os.path.dirname(os.path.abspath(__file__)) +
-                      "/network/datasets/" + network_name + "/params_binary.json") as json_data:
-                paramdict = json.load(json_data)
+        with open(os.path.dirname(os.path.abspath(__file__)) +
+                  "/network/datasets/"+ network_name + "/" + type + "/params_" + type + ".json") as json_data:
+            paramdict = json.load(json_data)
     else:
         print("Not yet implemented")
         # TODO: Implement a function to retrieve the parameters from the database
@@ -90,94 +87,117 @@ def setup_network():
     print(params)
     time_callback = TimeHistory()
     callbacks = [time_callback]
-    net = KerasNet(params,True,callbacks)
+    nets = []
+    if type == "binary":
+        classes = get_classes_from_folder("/network"+params["train_data_dir"])
+        print(classes)
+        for cls in classes:
+            paramcpy = params
+            nets.append(KerasNet(paramcpy,True,callbacks,session,cls))
+    else:
+        nets.append(KerasNet(params,True,callbacks,session))
     metrics = ['accuracy'] #kermet.fmeasure, kermet.recall, kermet.precision,
                #kermet.matthews_correlation, kermet.true_pos,
                #kermet.true_neg, kermet.false_pos, kermet.false_neg, kermet.specificity]
-    if net.setup_completed:
-        net.gen_data(save_preview=save_preview)
-        net.compile_setup(metrics)
-    return net, time_callback
+    for net in nets:
+        if net.setup_completed:
+            net.gen_data(save_preview=save_preview)
+            net.compile_setup(metrics)
+    return nets, time_callback
+
 
 def run_with_monitors(monitors=[],params = {}):
-    threads = []
-    phase = "setup"
-    # for monitor in monitors:
-    #     thr = threading.Thread(target=monitor.start_monitoring,args=(params,phase,session))
-    #     thr.deamon = True
-    #     thr.do_run = True
-    #     thr.start()
-    #     threads.append(thr)
-    net, time_callback = setup_network()
-    # for t in threads:
-    #     t.do_run = False
-    if net.setup_completed:
-        print("Setup completed")
-        if train:
-            threads = []
-            phase = "train"
-            for monitor in monitors:
-                thr = threading.Thread(target=monitor.start_monitoring,args=(params,phase,session))
-                thr.deamon = True
-                thr.do_run = True
-                thr.start()
-                threads.append(thr)
-            hist = net.train()
-            save_history(hist,"hist_"+phase+".json")
-            save_times(time_callback,"times_"+phase+".json")
-            for t in threads:
-                t.do_run = False
+    nets, time_callback = setup_network()
+    for net in nets:
+        if net.setup_completed:
+            print("Setup completed")
+            if train:
+                threads = []
+                phase = "train"
+                if net.classname != "":
+                    phase = phase + "_" + net.classname
+                for monitor in monitors:
+                    thr = threading.Thread(target=monitor.start_monitoring,args=(params,phase,session))
+                    thr.deamon = True
+                    thr.do_run = True
+                    thr.start()
+                    threads.append(thr)
+                hist = net.train()
+                save_history(hist,"hist_"+phase+".json")
+                save_times(time_callback,"times_"+phase+".json")
+                for t in threads:
+                    t.do_run = False
 
-        if fine_tune:
-            threads = []
-            phase = "fine_tune"
-            for monitor in monitors:
-                thr = threading.Thread(target=monitor.start_monitoring,args=(params,phase,session))
-                thr.deamon = True
-                thr.do_run = True
-                thr.start()
-                threads.append(thr)
-            hist = net.fine_tune()
-            save_history(hist,"hist_"+phase+".json")
-            save_times(time_callback,"times_"+phase+".json")
-            for t in threads:
-                t.do_run = False
-            if save_model:
-                net.save_model(os.path.dirname(os.path.abspath(__file__)) + "/network/model/" + network_name + "/model.h5")
+            if fine_tune:
+                threads = []
+                phase = "fine_tune"
+                if net.classname != "":
+                    phase = phase +  "_" + net.classname
+                for monitor in monitors:
+                    thr = threading.Thread(target=monitor.start_monitoring,args=(params,phase,session))
+                    thr.deamon = True
+                    thr.do_run = True
+                    thr.start()
+                    threads.append(thr)
+                hist = net.fine_tune()
+                save_history(hist,"hist_"+phase+".json")
+                save_times(time_callback,"times_"+phase+".json")
+                for t in threads:
+                    t.do_run = False
+                if save_model:
+                    net.save_model(os.path.dirname(os.path.abspath(__file__)) + "/network/model/" + network_name + "/model.h5")
 
-        if test:
-            threads = []
-            phase = "test"
-            if not train or not fine_tune:
-                net.load_model(os.path.dirname(os.path.abspath(__file__)) + "/network/model/" + network_name + "/model.h5")
-            net.load_test_data()
-            for monitor in monitors:
-                thr = threading.Thread(target=monitor.start_monitoring,args=(params,phase,session))
-                thr.deamon = True
-                thr.do_run = True
-                thr.start()
-                threads.append(thr)
-            predictions = net.test(testmode=testmode)
-            #save_times(time_callback,"times_"+phase+"_"+session+".json")
-            for t in threads:
-                t.do_run = False
-            report = net.score_test(predictions)
-            save_report(report, "report_"+phase+".txt")
+            if test:
+                threads = []
+                phase = "test"
+                if net.classname != "":
+                    phase = phase + "_" + net.classname
+                if not train or not fine_tune:
+                    net.load_model(os.path.dirname(os.path.abspath(__file__)) + "/network/model/" + network_name + "/model.h5")
+                net.load_test_data()
+                for monitor in monitors:
+                    thr = threading.Thread(target=monitor.start_monitoring,args=(params,phase,session))
+                    thr.deamon = True
+                    thr.do_run = True
+                    thr.start()
+                    threads.append(thr)
+                predictions = net.test(testmode=testmode)
+                for t in threads:
+                    t.do_run = False
+                report,report_dict = net.score_test(predictions)
+                save_report(report, "report_"+phase+".txt")
+                save_report_dict(report_dict, "report_"+phase+".json")
+
 
 def save_history(hist,name):
     dir = os.path.dirname(os.path.abspath(__file__)) + '/metrics/storage/sessions/' + session + "/kerasmon/"
     with open(dir + name, 'w') as f:
         json.dump(hist.history, f)
 
+
 def save_report(report,name):
     dir = os.path.dirname(os.path.abspath(__file__)) + '/metrics/storage/sessions/' + session + "/kerasmon/"
     with open(dir + name, 'w') as f:
         f.write(report)
 
+# From https://stackoverflow.com/questions/26646362/numpy-array-is-not-json-serializable
+class NumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return json.JSONEncoder.default(self, obj)
+
+def save_report_dict(report,name):
+    dir = os.path.dirname(os.path.abspath(__file__)) + '/metrics/storage/sessions/' + session + "/kerasmon/"
+    with open(dir + name, 'w') as f:
+        json.dump(report,f,cls=NumpyEncoder)
+
+
 def save_times(time_callback,name):
     dir = os.path.dirname(os.path.abspath(__file__)) + '/metrics/storage/sessions/' + session + "/kerasmon/"
     with open(dir + name, 'w') as f:
         json.dump(time_callback.times, f)
+
 
 def ensure_session_storage():
     directory = os.path.dirname(os.path.abspath(__file__)) + '/metrics/storage/sessions/' + session + "/"
@@ -188,6 +208,36 @@ def ensure_session_storage():
         os.makedirs(directory + "tpmon/figures/")
         os.makedirs(directory + "kerasmon/figures/")
 
+def walkerror(error):
+    print(error)
+
+def get_classes_from_folder(path):
+    longpath = os.path.dirname(os.path.abspath(__file__)) + path
+    classes = [ name for name in os.listdir(longpath) if os.path.isdir(os.path.join(longpath, name)) ]
+    classes = sorted(classes)
+    return classes
+
+def plot_results(rootdir,params):
+    gpu_specsdir = rootdir + "/nvmon/system_specs.json"
+    sys_specsdir = rootdir + "/psmon/system_specs.json"
+    metrics = [ name for name in os.listdir(rootdir) if os.path.isdir(os.path.join(rootdir, name)) ]
+
+    for metric in metrics:
+        for root, dirs, files in os.walk(rootdir + "/" + metric):
+            for filename in files:
+                if verbose_level == 1:
+                    print(metric,"/",filename)
+                if "hist" in filename and "png" not in filename:
+                    testplotter.plot_history(True, filename,
+                                             rootdir + "/" + metric + "/" + filename,
+                                             True, metric, save_figures, show_figures, session)
+                elif "report" not in filename and "specs" not in filename and "png" not in filename and "times" not in filename:
+                    testplotter.plot_json(True,filename,
+                                          rootdir + "/" + metric + "/" + filename,
+                                          0.5, True, gpu_specsdir,sys_specsdir,
+                                          metric, save_figures, show_figures, session)
+
+
 if __name__ == '__main__':
     # app.run()
     nvmon = NvMon()
@@ -197,23 +247,9 @@ if __name__ == '__main__':
     ensure_session_storage()
     # Set monitoring parameters
     # TODO: Bake this into some json file
-    params = {"nvmet":
-                  {"polling_rate":0.5,
-                   "batch_size":1000,
-                   "metrics":
-                       ["time","gpu_vol_perc","gpu_mem_perc","gpu_mem_actual","gpu_temp_c","gpu_fan_perc",
-                        "gpu_power_mw","gpu_clk_graphics","gpu_clk_sm","gpu_clk_mem","gpu_clk_video"]},
-              "psmet":
-                  {"polling_rate":0.5,
-                   "batch_size":1000,
-                   "metrics":
-                       ["time","cpu_percore_perc", "cpu_avg_perc","cpu_temp_c","mem_used","disk_io"]},
-              "tpmet":
-                  {"polling_rate":0.5,
-                   "batch_size":1000,
-                   "metrics":
-                       ["time","current_watt"]}
-              }
+    with open(os.path.dirname(os.path.abspath(__file__)) +
+              "/network/datasets/"+ network_name + "/" + type + "/params_metrics.json") as json_data:
+        params = json.load(json_data)
 
     # Get the system specs
     # TODO: Test if these exist first
@@ -225,33 +261,7 @@ if __name__ == '__main__':
 
 
     # Plot the results
-    # TODO: Automate this in some way
-    rootdir = "/metrics/storage/sessions/" + session
-    gpu_specsdir = rootdir + "/nvmon/system_specs.json"
-    sys_specsdir = rootdir + "/psmon/system_specs.json"
-    testplotter.plot_json(True,"GPU Usage Train",
-                          rootdir + "/nvmon/train.json",
-                          0.5, True, gpu_specsdir, "nvmon", save_figures, show_figures, session)
-    testplotter.plot_json(True,"GPU Usage Fine Tune",
-                          rootdir + "/nvmon/fine_tune.json",
-                          0.5, True, gpu_specsdir, "nvmon", save_figures, show_figures, session)
-    testplotter.plot_json(True,"GPU Usage Test",
-                          rootdir + "/nvmon/test.json",
-                          0.5, True, gpu_specsdir, "nvmon", save_figures, show_figures, session)
-    testplotter.plot_json(True, "System Usage Train",
-                          rootdir + "/psmon/train.json",
-                          0.5, True, sys_specsdir, "psmon", save_figures, show_figures, session)
-    testplotter.plot_json(True, "System Usage Fine Tune",
-                          rootdir + "/psmon/fine_tune.json",
-                          0.5, True, sys_specsdir, "psmon", save_figures, show_figures, session)
-    testplotter.plot_json(True, "System Usage Test",
-                          rootdir + "/psmon/test.json",
-                          0.5, True, sys_specsdir, "psmon", save_figures, show_figures, session)
-    testplotter.plot_history(True, "Network History Train",
-                             rootdir + "/kerasmon/hist_train.json",
-                             True, "kerasmon", save_figures, show_figures, session)
-    testplotter.plot_history(True,"Network History Fine Tune",
-                             rootdir + "/kerasmon/hist_fine_tune.json",
-                             True, "kerasmon", save_figures, show_figures, session)
+    rootdir = os.path.dirname(os.path.abspath(__file__)) + "/metrics/storage/sessions/" + session
+    plot_results(rootdir,params)
 
 

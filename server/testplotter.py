@@ -20,13 +20,15 @@ import datetime
 # Plots my metric json files using pyplot
 # TODO: Write more comments here and make it not so awful, perhaps fix the way metrics are stored so that it makes more
 # sense with how Keras stores history. Also split into smaller functions
-def plot_json(combine, figname, filepath, polling_rate, verbose, specsdir, library, save=True, show = True, sessionid="testing"):
-    with open(os.path.dirname(os.path.abspath(__file__)) + filepath) as json_data:
+def plot_json(combine, figname, filepath, polling_rate, verbose, gpu_specsdir,sys_specsdir, library, save=True, show = True, sessionid="testing"):
+    with open(filepath) as json_data:
         metrics = json.load(json_data)
     with open(os.path.dirname(os.path.abspath(__file__)) + "/metrics/dicts/units.json") as json_data:
         units = json.load(json_data)
-    with open(os.path.dirname(os.path.abspath(__file__)) + specsdir) as json_data:
-        specs = json.load(json_data)
+    with open(gpu_specsdir) as json_data:
+        gpu_specs = json.load(json_data)
+    with open(sys_specsdir) as json_data:
+        sys_specs = json.load(json_data)
     begin = metrics["0"]["0"]["time"]
     final = str(len(list(metrics[list(metrics.keys())[-1]].keys()))-5)
     end = metrics[list(metrics.keys())[-1]][final]["time"]
@@ -94,16 +96,19 @@ def plot_json(combine, figname, filepath, polling_rate, verbose, specsdir, libra
     if combine:
         title = figname + ": " + filepath + "\n" \
                 + "Time elapsed: " + str(datetime.timedelta(milliseconds=time_elapsed)) + "s" + "\n"
-        for spec in specs.keys():
-            title = title + spec + ": " + str(specs[spec]) + ", "
+        for spec in gpu_specs.keys():
+            title = title + spec + ": " + str(gpu_specs[spec]) + ", "
+        title = title + "\n"
+        for spec in sys_specs.keys():
+            title = title + spec + ": " + str(sys_specs[spec]) + ", "
 
         plt.suptitle(title)
-        plt.tight_layout(rect=[0, 0.03, 1, 0.93])
+        plt.tight_layout(rect=[0, 0.03, 1, 0.90])
         save_show(plt,library,sessionid,figname,show,save)
 
 # Plot history objects and in the future other callback objects from Keras
 def plot_history(combine, figname, filepath, verbose, library, save=True, show=True, sessionid="testing"):
-    with open(os.path.dirname(os.path.abspath(__file__)) + filepath) as json_data:
+    with open(filepath) as json_data:
         metrics = json.load(json_data)
     with open(os.path.dirname(os.path.abspath(__file__)) + "/metrics/dicts/units.json") as json_data:
         units = json.load(json_data)
@@ -149,7 +154,8 @@ def plot_history(combine, figname, filepath, verbose, library, save=True, show=T
 def save_show(plt, libary, sessionid, figname, show = True, save = False):
     dir = os.path.dirname(os.path.abspath(__file__)) + "/metrics/storage/sessions/"\
                          + sessionid + "/" + libary + "/figures/"
-    fign = figname.lower().replace(" ", "_") + '.png'
+    fign = figname.replace(".json","")
+    fign = fign.lower().replace(" ", "_") + '.png'
     path = dir + fign
     fig1 = plt.gcf()
     if show:

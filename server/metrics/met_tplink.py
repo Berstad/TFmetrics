@@ -14,6 +14,7 @@ import threading
 import time
 import json
 import os
+import subprocess
 
 #TODO Finish this file.
 class TpMon(threading.Thread):
@@ -21,23 +22,57 @@ class TpMon(threading.Thread):
     def __init__(self):
         threading.Thread.__init__(self)
 
-    def make_batch(metric_list = ["cpu_perc_split"], batch_size = 100):
-        batch = []
+    def make_batch(self,metric_list,polling_rate, batch_size,phase,sessionid,t,plugip):
+        batch = {}
+        batch["sessionid"] = sessionid
+        batch["phase"] = phase
+        batch["metric"] = "psmet"
+        for i in range(batch_size):
+            if getattr(t,"do_run",True):
+                metrics = {}
+                command = ["bash","/tp-link/hs100/hs100.sh","-i",plugip,"emeter"]
+                try:
+                    stroutp = subprocess.check_output(command,timeout=0.01)
+                except subprocess.CalledProcessError as e:
+                    raise RuntimeError("command '{}' return with error (code {}): {}".format(e.cmd, e.returncode, e.output))
+                mets_json = json.loads(stroutp)
+                for metric in metric_list:
+                    if metric == "time":
+                        metrics["time"] = int(round(time.time() * 1000))
+                    elif metric == "power":
+                        metrics["tp_power"] = mets_json["emeter"]["get_realtime"]["power"]
+                    elif metric == "voltage":
+                        metrics["tp_voltage"] = mets_json["emeter"]["get_realtime"]["voltage"]
+                    elif metric == "current":
+                        metrics["tp_current"] = mets_json["emeter"]["get_realtime"]["current"]
+                    elif metric == "total":
+                        metrics["tp_total"] = mets_json["emeter"]["get_realtime"]["total"]
+                batch[str(i)] = metrics
+                # Time taken in ms
+                timediff=(int(round(time.time() * 1000)) - metrics["time"])
+                # print(timediff)
+                if polling_rate-(timediff/1000) > 0:
+                    time.sleep(polling_rate-(timediff/1000))
+            else:
+                break
         return batch
 
 
     def start_monitoring(self,params,phase,sessionid):
         batches = {} #TODO: Change this to database storage
-        t = threading.currentThread()
         metric_list = params["tpmet"]["metrics"]
         polling_rate = params["tpmet"]["polling_rate"]
         batch_size = params["tpmet"]["batch_size"]
-        #while getattr(t,"do_run",True):
-        #    batch = make_batch(metric_list,polling_rate,batch_size,phase,sessionid)
-        #    batches.append(batch)
+        plugip = params["tpmet"]["plugip"]
+        t = threading.currentThread()
+        batch_num = 0
+        while getattr(t,"do_run",True):
+            batch = self.make_batch(metric_list,polling_rate,batch_size,phase,sessionid,t,plugip)
+            batches[str(batch_num)] = batch
+            batch_num += 1
 
         with open(os.path.dirname(os.path.abspath(__file__)) + '/storage/sessions/'
-                  + sessionid + '/tpmon/tpmon_' + phase +'.json', 'w') as f:
+                  + sessionid + '/tpmon/' + phase +'.json', 'w') as f:
             json.dump(batches, f)
 
 if __name__ == '__main__':
