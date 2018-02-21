@@ -35,8 +35,8 @@ show_figures = True
 save_model = True # This may break things?
 save_preview = False
 setup = True
-train = False # Set false to load earlier model
-fine_tune = False # Set false to load earlier model
+train = True # Set false to load earlier model
+fine_tune = True # Set false to load earlier model
 test = True
 verbose_level = 1
 

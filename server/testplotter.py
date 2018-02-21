@@ -31,6 +31,8 @@ def plot_json(combine, figname, filepath, polling_rate, verbose, gpu_specsdir,sy
         sys_specs = json.load(json_data)
     begin = metrics["0"]["0"]["time"]
     final = str(len(list(metrics[list(metrics.keys())[-1]].keys()))-5)
+    if verbose:
+        print("Final index: " + final)
     end = metrics[list(metrics.keys())[-1]][final]["time"]
     if verbose:
         print("Began time: ",datetime.datetime.fromtimestamp(
@@ -55,10 +57,13 @@ def plot_json(combine, figname, filepath, polling_rate, verbose, gpu_specsdir,sy
         mets.append([])
         for i in range (0,len(list(metrics.keys()))):
             for j in range (len(list(metrics[str(i)].keys()))-5):
-                if isinstance(metrics[str(i)][str(j)][metric], list):
-                    mets[met_index].append(np.mean(metrics[str(i)][str(j)][metric]))
+                if not metrics[str(i)][str(j)]:
+                    mets[met_index].append(np.nan)
                 else:
-                    mets[met_index].append(metrics[str(i)][str(j)][metric])
+                    if isinstance(metrics[str(i)][str(j)][metric], list):
+                        mets[met_index].append(np.mean(metrics[str(i)][str(j)][metric]))
+                    else:
+                        mets[met_index].append(metrics[str(i)][str(j)][metric])
         #print(mets[met_index])
         met_avg = np.mean(mets[met_index])
         if len(mets[met_index])%2 != 0:
