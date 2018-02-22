@@ -1,0 +1,10 @@
+{
+  "kwh": 0.51,
+  "nettleie" : 0.477,
+  "gpu": 7000,
+  "gpu_purchase_date" : "2017-10-19",
+  "cpu" : 2400,
+  "cpu_purchase_date" : "2011-04-01",
+  "mem" :  1400,
+  "mem_purchase_date": "2011-04-01"
+}

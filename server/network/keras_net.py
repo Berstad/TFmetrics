@@ -63,6 +63,7 @@ class KerasNet:
     train_optimizer = False
     fine_tune_optimizer = False
     calls = []
+    train_class_weights = None
 
     def __init__(self,paramdict_in,verbose_in = False,calls=[],sessioname = "test",classname = ""):
         #the base model
@@ -126,7 +127,7 @@ class KerasNet:
             e = sys.exc_info()[0]
             print("Error: ",e)
 
-    def load_model(self, path):
+    def my_load_model(self, path):
         self.model = load_model(path)
         if self.verbose:
             print("Model loaded!")
@@ -160,18 +161,22 @@ class KerasNet:
         # Read Data and Augment it: Make sure to select augmentations that are appropriate to your images.
         # To save augmentations un-comment save lines and add to your flow parameters.
         self.train_datagen = ImageDataGenerator(rescale=1. / 255,
-                                           #rotation_range=transformation_ratio,
-                                           #shear_range=transformation_ratio,
-                                           #zoom_range=transformation_ratio,
-                                           #cval=transformation_ratio,
-                                           horizontal_flip=True,
-                                           vertical_flip=True)
+                                               #rotation_range=transformation_ratio,
+                                               #shear_range=transformation_ratio,
+                                               #zoom_range=transformation_ratio,
+                                               #cval=transformation_ratio,
+                                               horizontal_flip=True,
+                                               vertical_flip=True)
         self.validation_datagen = ImageDataGenerator(rescale=1. / 255)
         self.train_generator = self.train_datagen.flow_from_directory(self.train_data_dir,
+                                                                      #shuffle=False,
                                                             target_size=(self.paramdict['imagedims'][0],
                                                                          self.paramdict['imagedims'][1]),
                                                             batch_size=self.paramdict['batch_size'],
                                                             class_mode='categorical')
+        self.train_class_weights = self.get_class_weights(self.train_generator.classes)
+        if self.verbose:
+            print("Training classes: ", self.train_generator.class_indices)
 
         # use the above 3 commented lines if you want to save and look at how the data augmentations look like
         # TODO: Look at this, it seems wrong
@@ -181,10 +186,13 @@ class KerasNet:
             self.model.save_to_dir(dir, save_prefix='aug', save_format='jpeg')
 
         self.validation_generator = self.validation_datagen.flow_from_directory(self.validation_data_dir,
+                                                                                #shuffle=False,
                                                                                 target_size=(self.paramdict['imagedims'][0],
                                                                                              self.paramdict['imagedims'][1]),
                                                                                 batch_size=self.paramdict['batch_size'],
                                                                                 class_mode='categorical')
+        if self.verbose:
+            print("Validation classes: ",self.validation_generator.class_indices)
 
     def compile_setup(self,metrics):
         # Compile the model
@@ -207,10 +215,10 @@ class KerasNet:
                                  epochs=self.paramdict['nb_epoch'] / 5,
                                  validation_data=self.validation_generator,
                                  validation_steps=self.paramdict['nb_validation_samples'] // self.paramdict['batch_size'],
-                                 callbacks=self.callbacks_list)
+                                 callbacks=self.callbacks_list,
+                                 class_weight=self.train_class_weights)
          save_json(self.model.to_json(),self.model_dir,"train_model.json")
          return history
-
 
     # fine-tune the model
     def fine_tune(self):
@@ -238,7 +246,7 @@ class KerasNet:
         # save weights of best training epoch: monitor either val_loss or val_acc
         self.final_weights_path = os.path.join(self.model_dir, 'model_weights.hdf5')
         self.callbacks_list = [
-            ModelCheckpoint(self.top_weights_path, monitor=self.paramdict['monitor_checkpoint'], verbose=1, save_best_only=True),
+            ModelCheckpoint(self.final_weights_path, monitor=self.paramdict['monitor_checkpoint'], verbose=1, save_best_only=True),
             EarlyStopping(monitor=self.paramdict['monitor_stopping'], patience=self.paramdict['patience'], verbose=0)
         ] + self.calls
         history = self.model.fit_generator(self.train_generator,
@@ -246,7 +254,8 @@ class KerasNet:
                                 epochs=self.paramdict['nb_epoch'],
                                 validation_data=self.validation_generator,
                                 validation_steps=self.paramdict['nb_validation_samples'] // self.paramdict['batch_size'],
-                                callbacks=self.callbacks_list)
+                                callbacks=self.callbacks_list,
+                                class_weight=self.train_class_weights)
         save_json(self.model.to_json(),self.model_dir,"fine_tune_model.json")
         return history
 
@@ -257,6 +266,8 @@ class KerasNet:
                                                                              verbose=False, rescale=255.)
 
     def test(self,testmode="scikit"):
+        if self.verbose:
+            print("Test classes: ", self.classes)
         if testmode == "scikit":
             self.test_generator = ImageDataGenerator()
             self.test_data_generator = self.test_generator.flow_from_directory(self.test_data_dir,
@@ -315,7 +326,7 @@ class KerasNet:
         for i in range(len(self.classes)):
             tp[i],tn[i],fp[i],fn[i],recall[i],specificity[i], precision[i], accuracy[i], f1[i], mcc[i] = misc_measures(tp[i],tn[i],fp[i],fn[i])
         conf_mat = metrics.confusion_matrix(predicted,y_data_conv)
-        report = "Classes: " + str(self.classes) + "\n" \
+        report = "Test classes: " + str(self.classes) + "\n" \
                  + "*************************\n" \
                  + "True Pos: " + str(tp) + "\n" \
                  + "Avg: " + str(np.mean(tp)) + "\n" \

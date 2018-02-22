@@ -15,7 +15,7 @@
   "tp_power" : "W",
   "tp_current" : "A",
   "tp_voltage" : "V",
-  "tp_total" : "kW",
+  "tp_total" : "kWh",
   "mem_used" : "B",
   "disk_io" : "B",
   "val_loss" : "loss",

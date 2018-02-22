@@ -27,16 +27,16 @@ import numpy as np
 
 app = Flask(__name__)
 network_name = "kvasir"
-type = "multiclass"
-session = "2018-02-21_multitest"
+type = "binary"
+session = "2018-02-22_binary_sequential_balanced_5epoch"
 testmode = "custom"
 save_figures = True
-show_figures = True
-save_model = True # This may break things?
+show_figures = False    # Setting this to true with binary nets will probably crash IDEA
+save_model = True       # This may break things?
 save_preview = False
 setup = True
-train = True # Set false to load earlier model
-fine_tune = True # Set false to load earlier model
+train = True            # Set false to load earlier model
+fine_tune = True        # Set false to load earlier model
 test = True
 verbose_level = 1
 
@@ -108,65 +108,94 @@ def setup_network():
 
 def run_with_monitors(monitors=[],params = {}):
     nets, time_callback = setup_network()
-    for net in nets:
-        if net.setup_completed:
+    for i in range(len(nets)):
+        if nets[i].setup_completed:
             print("Setup completed")
             if train:
+                if verbose_level == 1:
+                    print("************ Started training net",nets[i].classname, "************")
                 threads = []
                 phase = "train"
-                if net.classname != "":
-                    phase = phase + "_" + net.classname
+                if nets[i].classname != "":
+                    phase = phase + "_" + nets[i].classname
                 for monitor in monitors:
                     thr = threading.Thread(target=monitor.start_monitoring,args=(params,phase,session))
                     thr.deamon = True
                     thr.do_run = True
                     thr.start()
                     threads.append(thr)
-                hist = net.train()
+                hist = nets[i].train()
                 save_history(hist,"hist_"+phase+".json")
                 save_times(time_callback,"times_"+phase+".json")
                 for t in threads:
                     t.do_run = False
+                if verbose_level == 1:
+                    print("************ Finished training net",nets[i].classname, "************")
 
             if fine_tune:
+                if verbose_level == 1:
+                    print("************ Started fine tuning net",nets[i].classname, "************")
                 threads = []
                 phase = "fine_tune"
-                if net.classname != "":
-                    phase = phase +  "_" + net.classname
+                if nets[i].classname != "":
+                    phase = phase +  "_" + nets[i].classname
                 for monitor in monitors:
                     thr = threading.Thread(target=monitor.start_monitoring,args=(params,phase,session))
                     thr.deamon = True
                     thr.do_run = True
                     thr.start()
                     threads.append(thr)
-                hist = net.fine_tune()
+                hist = nets[i].fine_tune()
                 save_history(hist,"hist_"+phase+".json")
                 save_times(time_callback,"times_"+phase+".json")
                 for t in threads:
                     t.do_run = False
                 if save_model:
-                    net.save_model(os.path.dirname(os.path.abspath(__file__)) + "/network/model/" + network_name + "/model.h5")
+                    if nets[i].classname != "":
+                        nets[i].save_model(os.path.dirname(os.path.abspath(__file__))
+                                           + "/network/model/" + network_name + "/" + session
+                                           + "/" + nets[i].classname + "/model.h5")
+                    else:
+                        nets[i].save_model(os.path.dirname(os.path.abspath(__file__))
+                                           + "/network/model/" + network_name + "/" + session
+                                           + "/model.h5")
+                if verbose_level == 1:
+                    print("************ Finished fine tuning net", nets[i].classname, "************")
 
             if test:
+                if verbose_level == 1:
+                    print("************ Started testing net", nets[i].classname, "************")
                 threads = []
                 phase = "test"
-                if net.classname != "":
-                    phase = phase + "_" + net.classname
+                if nets[i].classname != "":
+                    phase = phase + "_" + nets[i].classname
                 if not train or not fine_tune:
-                    net.load_model(os.path.dirname(os.path.abspath(__file__)) + "/network/model/" + network_name + "/model.h5")
-                net.load_test_data()
+                    if nets[i].classname != "":
+                        nets[i].my_load_model(os.path.dirname(os.path.abspath(__file__))
+                                              + "/network/model/" + network_name + "/" + session
+                                              + "/" + nets[i].classname + "/model.h5")
+                    else:
+                        nets[i].my_load_model(os.path.dirname(os.path.abspath(__file__))
+                                              + "/network/model/" + network_name + "/" + session
+                                              + "/model.h5")
+                nets[i].load_test_data()
                 for monitor in monitors:
                     thr = threading.Thread(target=monitor.start_monitoring,args=(params,phase,session))
                     thr.deamon = True
                     thr.do_run = True
                     thr.start()
                     threads.append(thr)
-                predictions = net.test(testmode=testmode)
+                predictions = nets[i].test(testmode=testmode)
                 for t in threads:
                     t.do_run = False
-                report,report_dict = net.score_test(predictions)
+                report,report_dict = nets[i].score_test(predictions)
                 save_report(report, "report_"+phase+".txt")
                 save_report_dict(report_dict, "report_"+phase+".json")
+            if verbose_level == 1:
+                print("************ Finished testing net",nets[i].classname, "************")
+        nets[i] = None
+        if verbose_level == 1:
+            print("Tried to free memory")
 
 
 def save_history(hist,name):
