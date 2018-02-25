@@ -28,3 +28,5 @@ server/network/packages/images
 !/server/network/datasets/kvasir/params_multiclass.json
 server/network/datasets/mnist/
 /server/logs/
+server/database/
+server/network/datasets/kvasir-dataset-v2-features/

@@ -18,7 +18,6 @@ from keras import optimizers
 from collections import Counter
 import os
 from keras.callbacks import EarlyStopping
-from sklearn import metrics
 import keras
 import sys
 import time
@@ -64,6 +63,7 @@ class KerasNet:
     fine_tune_optimizer = False
     calls = []
     train_class_weights = None
+    y_data = None
 
     def __init__(self,paramdict_in,verbose_in = False,calls=[],sessioname = "test",classname = ""):
         #the base model
@@ -293,103 +293,14 @@ class KerasNet:
             #test_predictions = self.model.predict(self.x_data)
             if self.verbose:
                 print("Predictions completed")
-            return test_predictions
+            return (self.classname,test_predictions)
 
-    def score_test(self,test_predictions):
-        tp = np.zeros(len(self.classes)) # pred = y_data =>
-        tn = np.zeros(len(self.classes)) # pred = y_data =>
-        fp = np.zeros(len(self.classes)) # pred != y_data =>
-        fn = np.zeros(len(self.classes)) # pred != y_data =>
-        recall = np.zeros(len(self.classes))
-        specificity = np.zeros(len(self.classes))
-        precision = np.zeros(len(self.classes))
-        accuracy = np.zeros(len(self.classes))
-        f1 = np.zeros(len(self.classes))
-        mcc = np.zeros(len(self.classes))
-        total_per_class = np.zeros(len(self.classes))
-        predicted = np.argmax(test_predictions,axis=1)
-        y_data_conv = []
-        for i in range(len(predicted)):
-            total_per_class[predicted[i]] += 1
-            y_data_conv.append(self.classes.index(self.y_data[i]))
-            for j in range(len(self.classes)):
-                if j == self.classes.index(self.y_data[i]):
-                    if predicted[i] == j:
-                        tp[j] += 1
-                    else:
-                        fn[j] += 1
-                else:
-                    if predicted[i] == j:
-                        fp[j] += 1
-                    else:
-                        tn[j] += 1
-        for i in range(len(self.classes)):
-            tp[i],tn[i],fp[i],fn[i],recall[i],specificity[i], precision[i], accuracy[i], f1[i], mcc[i] = misc_measures(tp[i],tn[i],fp[i],fn[i])
-        conf_mat = metrics.confusion_matrix(predicted,y_data_conv)
-        report = "Test classes: " + str(self.classes) + "\n" \
-                 + "*************************\n" \
-                 + "True Pos: " + str(tp) + "\n" \
-                 + "Avg: " + str(np.mean(tp)) + "\n" \
-                 + "*************************\n" \
-                 + "True Neg: " + str(tn) + "\n" \
-                 + "Avg: " + str(np.mean(tn)) + "\n" \
-                 + "*************************\n" \
-                 + "False Pos: " + str(fp) + "\n" \
-                 + "Avg: " + str(np.mean(fp)) + "\n" \
-                 + "*************************\n" \
-                 + "False Neg: " + str(fn) + "\n" \
-                 + "Avg: " + str(np.mean(fn)) + "\n" \
-                 + "*************************\n" \
-                 + "Recall: " + str(recall) + "\n" \
-                 + "Avg: " + str(np.mean(recall)) + "\n" \
-                 + "*************************\n" \
-                 + "Specificity: " + str(specificity) + "\n" \
-                 + "Avg: " + str(np.mean(specificity)) + "\n" \
-                 + "*************************\n" \
-                 + "Precision: " + str(precision) + "\n" \
-                 + "Avg: " + str(np.mean(precision)) + "\n" \
-                 + "*************************\n" \
-                 + "Accuracy: " + str(accuracy) + "\n" \
-                 + "Avg: " + str(np.mean(accuracy)) + "\n" \
-                 + "Avg: " + str(np.mean(accuracy)) + "\n" \
-                 + "*************************\n" \
-                 + "F1 measure: " + str(f1) + "\n" \
-                 + "Avg: " + str(np.mean(f1)) + "\n" \
-                 + "*************************\n" \
-                 + "MCC: " + str(mcc) + "\n" \
-                 + "Avg: " + str(np.mean(mcc)) + "\n" \
-                 + "*************************\n" \
-                 + "Totals per class: " + np.array_str(total_per_class) + "\n" \
-                 + "Confusion matrix:\n " + np.array_str(conf_mat)
-        report_dict = {"classes": self.classes,
-                       "tp": tp,
-                       "tn": tn,
-                       "fp": fp,
-                       "fn": fn,
-                       "recall": recall,
-                       "specificity": specificity,
-                       "precision": precision,
-                       "accuracy": accuracy,
-                       "f1": f1,
-                       "mcc": mcc,
-                       "total_per_class": total_per_class,
-                       "confusion": conf_mat}
-        return report, report_dict
-
-'''Non-keras method: Used for test'''
-def misc_measures(tp, tn, fp, fn):
-    accuracy=(float(tp+tn)/float(tp+tn+fp+fn)) if (tp+tn+fp+fn) > 0 else 0.
-    recall=(float(tp)/float(tp+fn)) if (tp+fn) > 0 else 0.
-    specificity=(float(tn)/float(tn+fp)) if (tn+fp) > 0 else 0.
-    precision=(float(tp)/float(tp+fp)) if (tp+fp) > 0 else 0.
-    f1=(float(2*tp)/float(2*tp+fp+fn)) if (2*tp+fp+fn) > 0 else 0.
-    mcc=(float(tp*tn-fp*fn)/math.sqrt(float(tp+fp)*float(tp+fn)*float(tn+fp)*float(tn+fn))) if (float(tp+fp)*float(tp+fn)*float(tn+fp)*float(tn+fn)) > 0 else 0.
-    return tp, tn, fp, fn, recall, specificity, precision, accuracy, f1, mcc
 
 def save_json(obj,path,name):
     os.makedirs(path, exist_ok=True)
     with open(path + name, 'w') as f:
         json.dump(obj, f)
+
 
 def open_json(path,name):
     dir = os.path.dirname(os.path.abspath(__file__)) + path
