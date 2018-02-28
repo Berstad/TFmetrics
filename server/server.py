@@ -27,11 +27,12 @@ import sys
 import math
 import numpy as np
 import network.packages.images.loadimg as loadimg
+from multiprocessing.pool import ThreadPool
 
 app = Flask(__name__)
 network_name = "kvasir"
-type = "multiclass"
-session = "2018-02-22_multiclass_5epoch_weighted-test"
+type = "binary"
+session = "2018-02-22_binary_sequential_balanced_5epoch"
 testmode = "custom"
 save_figures = True     # Set this to true to save png figures of the json metric logs
 show_figures = False    # Setting this to true with binary nets will probably crash IDEA
@@ -41,8 +42,8 @@ setup = True           # Must always be true pretty much
 train = False            # Set false to load earlier model
 fine_tune = False        # Set false to load earlier model
 test = True             # Will load earlier model, if either the above are false
-binary_test = False      # If this is set to true then only the binary test will be run
-binary_test_data_dir = "network/datasets/kvasir/multiclass/validation",
+binary_test = True      # If this is set to true then only the binary test will be run
+binary_test_data_dir =  os.path.dirname(os.path.abspath(__file__)) + "/network/datasets/kvasir/multiclass/validation"
 verbose_level = 1       # Sets the level of different printouts
 
 @app.route('/')
@@ -266,7 +267,7 @@ def test_net(net,monitors,output_weights=[]):
     y_data = net.y_data
     for t in threads:
         t.do_run = False
-    report,report_dict = score_test(net.classes,predictions,y_data,output_weights)
+    report, report_dict = score_test(net.classes,predictions,y_data,output_weights)
     save_report(report, "report_"+phase+".txt")
     save_report_dict(report_dict, "report_"+phase+".json")
     if verbose_level == 1:
@@ -281,31 +282,43 @@ def test_binary_nets(nets, monitors, mode = "parallell",output_weights = []):
     net_threads = []
     predictions = []
     phase = "binary_test"
-    x_data,y_data,classes = loadimg.getimagedataandlabels(binary_test_data_dir,
+    x_data, y_data, classes = loadimg.getimagedataandlabels(binary_test_data_dir,
                                                           nets[0].paramdict['imagedims'][0],
                                                           nets[0].paramdict['imagedims'][1],
                                                           verbose=False, rescale=255.)
+    if verbose_level == 1:
+        print("************ Test data loading completed ************")
     for net in nets:
-        net.my_load_model(os.path.dirname(os.path.abspath(__file__))
+        net.my_load_model_weights(os.path.dirname(os.path.abspath(__file__))
                           + "/network/model/" + network_name + "/" + session
-                          + "/" + net.classname + "/model.h5")
+                          + "/" + net.classname + "/top_model_weights.hdf5")
         net.model._make_predict_function() # Initialize before threading
+        net.set_test_data(x_data)
+        net.set_classes(classes)
+    if verbose_level == 1:
+        print("************ All weights loaded ************")
     for monitor in monitors:
         thr = threading.Thread(target=monitor.start_monitoring,args=(params,phase,session))
         thr.deamon = True
         thr.do_run = True
         thr.start()
         mon_threads.append(thr)
+    if verbose_level == 1:
+        print("************ Started monitoring, making prediction threads ************")
+    pool = ThreadPool(processes=len(nets))
+    results = []
     for net in nets:
-        thr = threading.Thread(target=net.test,args="custom")
-        thr.deamon = True
-        thr.start()
-        net_threads.append(thr)
-    for t in net_threads:
-        predictions.append(t.join())
+        results.append(pool.apply_async(net.test))
+    pool.close()
+    pool.join()
+    predictions = [r.get() for r in results]
     for t in mon_threads:
         t.do_run = False
+    if verbose_level == 1:
+        print("************ All predictions completed! Scoring test ************")
     report,report_dict = score_test(classes,predictions,y_data,output_weights)
+    if verbose_level == 1:
+        print("************ Test scored, saving reports ************")
     save_report(report, "report_"+phase+".txt")
     save_report_dict(report_dict, "report_"+phase+".json")
     if verbose_level == 1:
@@ -313,23 +326,24 @@ def test_binary_nets(nets, monitors, mode = "parallell",output_weights = []):
 
 
 def score_test(classes,test_predictions,y_data, output_weights = []):
-    tp = np.zeros(len(classes)) # pred = y_data =>
-    tn = np.zeros(len(classes)) # pred = y_data =>
-    fp = np.zeros(len(classes)) # pred != y_data =>
-    fn = np.zeros(len(classes)) # pred != y_data =>
-    recall = np.zeros(len(classes))
-    specificity = np.zeros(len(classes))
-    precision = np.zeros(len(classes))
-    accuracy = np.zeros(len(classes))
-    f1 = np.zeros(len(classes))
-    mcc = np.zeros(len(classes))
-    total_per_class = np.zeros(len(classes))
-    predicted = make_final_predictions(test_predictions,output_weights)
+    classlen = len(classes)
+    tp = np.zeros(classlen) # pred = y_data =>
+    tn = np.zeros(classlen) # pred = y_data =>
+    fp = np.zeros(classlen) # pred != y_data =>
+    fn = np.zeros(classlen) # pred != y_data =>
+    recall = np.zeros(classlen)
+    specificity = np.zeros(classlen)
+    precision = np.zeros(classlen)
+    accuracy = np.zeros(classlen)
+    f1 = np.zeros(classlen)
+    mcc = np.zeros(classlen)
+    total_per_class = np.zeros(classlen)
+    predicted = make_final_predictions(classes, test_predictions, output_weights)
     y_data_conv = []
     for i in range(len(predicted)):
         total_per_class[predicted[i]] += 1
         y_data_conv.append(classes.index(y_data[i]))
-        for j in range(len(classes)):
+        for j in range(classlen):
             if j == classes.index(y_data[i]):
                 if predicted[i] == j:
                     tp[j] += 1
@@ -393,13 +407,24 @@ def score_test(classes,test_predictions,y_data, output_weights = []):
                    "confusion": conf_mat}
     return report, report_dict
 
-def make_final_predictions(test_predictions,output_weights):
+def make_final_predictions(classes,test_predictions,output_weights):
+    if verbose_level == 1:
+        print("Making final predictions")
     if type == "multiclass":
         predicted = np.multiply(test_predictions, np.asarray(output_weights))
         predicted = np.argmax(predicted,axis=1)
     elif type == "binary":
-        # TODO: Make this part work
-        predicted = np.argmax(test_predictions,axis=1)
+        print(len(test_predictions))
+        print(test_predictions[0])
+        predicted = np.zeros((len(test_predictions[0][1]),len(output_weights)))
+        for predictions in test_predictions:
+            if verbose_level == 1:
+                print("Predictions for class: " + predictions[0])
+            index = classes.index(predictions[0])
+            for i in range(len(predictions[1])):
+                predicted[i][index] = predictions[1][i][1]
+        predicted = np.multiply(predicted, np.asarray(output_weights))
+        predicted = np.argmax(predicted,axis=1)
     else:
         predicted = np.multiply(test_predictions, np.asarray(output_weights))
         predicted = np.argmax(predicted,axis=1)

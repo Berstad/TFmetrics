@@ -137,6 +137,11 @@ class KerasNet:
         if self.verbose:
             print("Model saved!")
 
+    def my_load_model_weights(self,path):
+        self.model.load_weights(path)
+        if self.verbose:
+            print("Model weights loaded!")
+
     #weight function for imbalanced datasets
     def get_class_weights(self,y):
         counter = Counter(y)
@@ -263,9 +268,14 @@ class KerasNet:
         self.x_data,self.y_data,self.classes = loadimg.getimagedataandlabels(self.test_data_dir,
                                                                              self.paramdict['imagedims'][0],
                                                                              self.paramdict['imagedims'][1],
-                                                                             verbose=False, rescale=255.)
+                                                                            verbose=False, rescale=255.)
+    def set_classes(self,classes):
+        self.classes = classes
 
-    def test(self,testmode="scikit"):
+    def set_test_data(self,x_data):
+        self.x_data = x_data
+
+    def test(self,testmode="custom"):
         if self.verbose:
             print("Test classes: ", self.classes)
         if testmode == "scikit":
@@ -288,8 +298,8 @@ class KerasNet:
                  # x_l = np.expand_dims(self.x_data[i], axis=0)
                  current = self.model.predict(self.x_data[i],verbose=0)
                  test_predictions.append(current[0])
-                 # if self.verbose:
-                 #     print("Predicted sample " + str(i) + " as class " + str(test_predictions[i]))
+                 if self.verbose and i%100 == 0:
+                     print("Predicted sample " + str(i) + " as class " + str(test_predictions[i]))
             #test_predictions = self.model.predict(self.x_data)
             if self.verbose:
                 print("Predictions completed")
