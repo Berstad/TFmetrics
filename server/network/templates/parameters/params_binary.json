@@ -1,4 +1,19 @@
 {
+  "dataset" : "kvasir",
+  "network_type" : "binary",
+  "session" : "sessionname",
+  "testmode" : "custom_all",
+  "save_figures" : true,
+  "show_figures" : false,
+  "save_model" : true,
+  "save_preview" : false,
+  "setup" : true,
+  "train" : true,
+  "fine_tune" : true,
+  "test" : true,
+  "binary_test" : false,
+  "binary_test_data_dir" :  "/network/datasets/kvasir/multiclass/validation",
+  "verbose_level" : 1,
   "model": "inception-v3",
   "activation": "softmax",
   "nb_classes": 2,
@@ -13,7 +28,7 @@
   "transformation_ratio": 0.05,
   "train_optimizer": "nadam",
   "fine_tune_optimizer" : "nadam",
-  "loss": "binary_crossentropy",
+  "loss": "categorical_crossentropy",
   "train_data_dir": "/datasets/kvasir/binary/training",
   "validation_data_dir": "/datasets/kvasir/binary/validation",
   "test_data_dir": "/datasets/kvasir/binary/validation",
@@ -26,4 +41,24 @@
   "nadam_beta_1" : 0.9,
   "nadam_beta_2" : 0.999,
   "output_class_weights": [0.512, 4.167, 0.816, 0.687, 0.653, 2.294, 1.930, 2.164]
+  "nvmet":
+  {
+    "polling_rate":0.5,
+    "batch_size":1000,
+    "metrics": ["time","gpu_vol_perc","gpu_mem_perc","gpu_mem_actual","gpu_temp_c","gpu_fan_perc",
+      "gpu_power_mw","gpu_clk_graphics","gpu_clk_sm","gpu_clk_mem","gpu_clk_video"]
+  },
+  "psmet":
+  {
+    "polling_rate":0.5,
+    "batch_size":1000,
+    "metrics": ["time","cpu_percore_perc", "cpu_avg_perc","cpu_temp_c","mem_used","disk_io"]
+  },
+  "tpmet":
+  {
+    "polling_rate":5,
+    "batch_size":1000,
+    "metrics": ["time","power","current","voltage","total"],
+    "plugip": "##INSERT TP-LINK IP HERE##"
+  }
 }

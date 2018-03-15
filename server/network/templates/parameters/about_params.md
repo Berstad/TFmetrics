@@ -1,9 +1,26 @@
 ## Parameter files
-These files must be in the dataset folder, if the network is intended to be binary, the file "params_binary.json" must 
-be present, if the network should be multiclass the file "params_multiclass.json" must be present. The file 
-"params_metrics.json" must always be present
+All parameters are stored in a single file, this is so that the wrapper can run several tests
+, one after another, depending on how many parameter files are in a given folder.
 
-### Network paramters
+### Running parameters
+* dataset = The name of the dataset to use
+* type = The style of network to use, multiclass or binary
+* session = The name of the session
+* testmode = Testing mode, use scikit learn or custom methods, also whether to run the test
+images through sequentially or concurrently with the predict function
+* save_figures = Set this to true to save png figures of the json metric logs
+* show_figures = Setting this to true with binary nets will probably crash IDEA
+* save_model = Save the model after fine tuning
+* save_preview = Save preview of image alterations
+* setup = Must always be true pretty much
+* train = Set false to load earlier model
+* fine_tune = Set false to load earlier model
+* test = Will load earlier model, if either the above are false
+* binary_test = If this is set to true then only the binary test will be run
+* binary_test_data_dir = Directory of the test data
+* verbose_level = Sets the level of different printouts, default is level 1
+
+### Network parameters
 * model = The model to use, right now only Inception v-3 and xception are supported.
 * nb_classes = number of classes 2 for binary, >2 for multiclass, has to be equal to the folder in the train and
 * nb_classes_actual = number of actual classes, might be used for binary

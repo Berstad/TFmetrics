@@ -20,7 +20,7 @@ import datetime
 # Plots my metric json files using pyplot
 # TODO: Write more comments here and make it not so awful, perhaps fix the way metrics are stored so that it makes more
 # sense with how Keras stores history. Also split into smaller functions
-def plot_json(combine, figname, filepath, polling_rate, verbose, gpu_specsdir,sys_specsdir, library, save=True, show = True, sessionid="testing"):
+def plot_json(combine, figname, filepath, verbose, gpu_specsdir,sys_specsdir, library, save=True, show = True, sessionid="testing"):
     with open(filepath) as json_data:
         metrics = json.load(json_data)
     with open(os.path.dirname(os.path.abspath(__file__)) + "/metrics/dicts/units.json") as json_data:
@@ -68,7 +68,16 @@ def plot_json(combine, figname, filepath, polling_rate, verbose, gpu_specsdir,sy
         met_avg = np.mean(mets[met_index])
         if len(mets[met_index])%2 != 0:
             mets[met_index].append(mets[met_index][-1])
-        x = np.arange(0, (len(mets[met_index])//2),polling_rate)
+        polling_rate = (time_elapsed/1000)/len(mets[met_index])
+        polling_rate = round(polling_rate,1)
+        if polling_rate > 1:
+            polling_rate = round(polling_rate)
+        if verbose:
+            print("Polling rate: ", polling_rate,"s")
+            print("Metric array length: ", len(mets[met_index]))
+        x = np.arange(0, len(mets[met_index])*polling_rate,polling_rate)
+        if verbose:
+            print("X-axis length: ", len(x))
         if combine:
             plt.subplot(3,4,met_index+1)
 
