@@ -24,6 +24,7 @@ import testplotter
 import sys
 import math
 import numpy as np
+import time
 import network.packages.images.loadimg as loadimg
 from multiprocessing.pool import ThreadPool
 
@@ -97,6 +98,7 @@ class NetworkHandler:
             for i in range(len(nets)):
                 if nets[i].setup_completed:
                     print("Setup completed")
+                    self.calibrate(nets[i],monitors)
                     if train:
                         self.train_net(nets[i], monitors, time_callback)
                     if fine_tune:
@@ -170,6 +172,27 @@ class NetworkHandler:
                                               rootdir + "/" + metric + "/" + filename,
                                               True, gpu_specsdir, sys_specsdir,
                                               metric, save_figures, show_figures, session)
+
+    def calibrate(self, net, monitors):
+        verbose_level = self.paramdict["verbose_level"]
+        if verbose_level == 1:
+            print("************ Started calibration for net", net.classname, "************")
+            print("Calibration for 1 minute")
+        threads = []
+        phase = "calibration"
+        if net.classname != "":
+            phase = phase + "_" + net.classname
+        for monitor in monitors:
+            thr = threading.Thread(target=monitor.start_monitoring, args=(self.paramdict, phase, self.paramdict["session"]))
+            thr.deamon = True
+            thr.do_run = True
+            thr.start()
+            threads.append(thr)
+        time.sleep(60)
+        for t in threads:
+            t.do_run = False
+        if verbose_level == 1:
+            print("************ Finished calibration for net", net.classname, "************")
 
     def train_net(self, net, monitors, time_callback):
         verbose_level = self.paramdict["verbose_level"]
@@ -257,11 +280,15 @@ class NetworkHandler:
             thr.do_run = True
             thr.start()
             threads.append(thr)
+        start_time = int(round(time.time() * 1000))
         (classname,predictions) = net.test(testmode=testmode)
+        end_time = int(round(time.time() * 1000))
+        time_elapsed = end_time - start_time
+        fps = len(net.x_data)/(time_elapsed/1000)
         y_data = net.y_data
         for t in threads:
             t.do_run = False
-        report, report_dict = self.score_test(net.classes, predictions, y_data, output_weights)
+        report, report_dict = self.score_test(net.classes, predictions, y_data, output_weights, start_time, end_time, time_elapsed, fps)
         self.save_report(report, "report_"+phase+".txt")
         self.save_report_dict(report_dict, "report_"+phase+".json")
         if verbose_level == 1:
@@ -274,7 +301,7 @@ class NetworkHandler:
         testmode = self.paramdict["testmode"]
         dataset = self.paramdict["dataset"]
         session = self.paramdict["session"]
-
+        self.calibrate(nets[0],monitors)
         if verbose_level == 1:
             print("************ Started testing binary nets ************")
         mon_threads = []
@@ -307,16 +334,20 @@ class NetworkHandler:
             print("************ Started monitoring, making prediction threads ************")
         pool = ThreadPool(processes=len(nets))
         results = []
+        start_time = int(round(time.time() * 1000))
         for net in nets:
             results.append(pool.apply_async(net.test, (testmode,)))
         pool.close()
         pool.join()
         predictions = [r.get() for r in results]
+        end_time = int(round(time.time() * 1000))
+        time_elapsed = end_time - start_time
+        fps = len(x_data)/(time_elapsed/1000)
         for t in mon_threads:
             t.do_run = False
         if verbose_level == 1:
             print("************ All predictions completed! Scoring test ************")
-        report,report_dict = self.score_test(classes, predictions, y_data, output_weights)
+        report,report_dict = self.score_test(classes, predictions, y_data, output_weights, start_time, end_time, time_elapsed, fps)
         if verbose_level == 1:
             print("************ Test scored, saving reports ************")
         self.save_report(report, "report_"+phase+".txt")
@@ -324,7 +355,7 @@ class NetworkHandler:
         if verbose_level == 1:
             print("************ Finished testing net binary nets ************")
 
-    def score_test(self, classes, test_predictions, y_data, output_weights):
+    def score_test(self, classes, test_predictions, y_data, output_weights, start_time, end_time, time_elapsed, fps):
         classlen = len(classes)
         tp = np.zeros(classlen) # pred = y_data =>
         tn = np.zeros(classlen) # pred = y_data =>
@@ -391,7 +422,10 @@ class NetworkHandler:
                  + "Avg: " + str(np.mean(mcc)) + "\n" \
                  + "*************************\n" \
                  + "Totals per class: " + np.array_str(total_per_class) + "\n" \
-                 + "Confusion matrix:\n " + np.array_str(conf_mat)
+                 + "Confusion matrix:\n " + np.array_str(conf_mat) + "\n" \
+                 + "*************************\n" \
+                 + "Time elapsed: " + str(time_elapsed) + "ms\n" \
+                 + "FPS: " + str(fps) + "\n"
         report_dict = {"classes": classes,
                        "tp": tp,
                        "tn": tn,
@@ -404,7 +438,11 @@ class NetworkHandler:
                        "f1": f1,
                        "mcc": mcc,
                        "total_per_class": total_per_class,
-                       "confusion": conf_mat}
+                       "confusion": conf_mat,
+                       "start_time": start_time,
+                       "end_time": end_time,
+                       "time_elapsed": time_elapsed,
+                       "fps": fps}
         return report, report_dict
 
     def make_final_predictions(self, classes,test_predictions,output_weights):
@@ -451,31 +489,36 @@ if __name__ == '__main__':
     paramdir = os.path.dirname(os.path.abspath(__file__)) + "/param_files/"
     for directory, subdirectories, files in os.walk(paramdir, onerror=walkerror):
         for file in sorted(files):
-            nvmon = NvMon()
-            psmon = PsMon()
-            tpmon = TpMon()
+            monlist = []
             paramdict = open_json(paramdir, file)
+            session = paramdict["session"]
+            if "nvmet" in paramdict:
+                nvmon = NvMon()
+                nvmon.get_system_specs(session)
+                monlist.append(nvmon)
+            if "psmet" in paramdict:
+                psmon = PsMon()
+                psmon.get_system_specs(session)
+                monlist.append(psmon)
+            if "tpmet" in paramdict:
+                tpmon = TpMon()
+                monlist.append(tpmon)
             paramcpy = paramdict
             paramcpy["binary_test"] = False
             handler = NetworkHandler(paramcpy)
             handler.ensure_session_storage()
-            session = paramdict["session"]
-
-            # Get the system specs
-            # TODO: Test if these exist first
-            nvmon.get_system_specs(session)
-            psmon.get_system_specs(session)
 
             # Run the network and monitor performance
-            handler.run_with_monitors([nvmon, tpmon, psmon])
+            handler.run_with_monitors(monlist)
 
 
             # Plot the results
             rootdir = os.path.dirname(os.path.abspath(__file__)) + "/metrics/storage/sessions/" + session
             handler.plot_results(rootdir)
-
+            
             if paramdict["network_type"] == "binary" and paramdict["binary_test"]:
                 handler = NetworkHandler(paramdict)
-                handler.run_with_monitors([nvmon, tpmon, psmon])
-
-
+                handler.run_with_monitors(monlist)
+            os.rename(paramdir + file, paramdir + "completed/" + file)
+                
+                

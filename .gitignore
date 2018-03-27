@@ -3,7 +3,7 @@ TFmetrics.iml
 mkl-dnn/
 server/network/datasets/cifar-100/
 server/network/datasets/kvasir/
-server/network/datasets/kvasir-folds/
+server/network/datasets/kvasir-dataset-v2/
 server/network/datasets/kvasir-nerthus-combined/
 server/network/datasets/nerthus/
 server/network/model/cifar-100/
