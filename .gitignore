@@ -23,7 +23,6 @@ server/metrics/__pycache__/
 server/network/__pycache__/
 server/network/backup/
 server/network/tf-learning-example.py
-server/network/packages/images
 !/server/network/datasets/kvasir/params_binary.json
 !/server/network/datasets/kvasir/params_multiclass.json
 server/network/datasets/mnist/
