@@ -75,10 +75,11 @@ class NvMon(threading.Thread):
                     else:
                         pass
                 batch[str(i)] = metrics
-                # Time taken in ms
+                 # Time taken in ms
                 timediff=(int(round(time.time() * 1000)) - metrics["time"])
-                #print(timediff)
-                time.sleep(polling_rate-(timediff/1000))
+                # print(timediff)
+                if polling_rate-(timediff/1000) > 0:
+                    time.sleep(polling_rate-(timediff/1000))
             else:
                 break
         return batch
