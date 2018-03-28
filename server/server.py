@@ -492,6 +492,10 @@ if __name__ == '__main__':
             monlist = []
             paramdict = open_json(paramdir, file)
             session = paramdict["session"]
+            paramcpy = paramdict
+            paramcpy["binary_test"] = False
+            handler = NetworkHandler(paramcpy)
+            handler.ensure_session_storage()
             if "nvmet" in paramdict:
                 nvmon = NvMon()
                 nvmon.get_system_specs(session)
@@ -503,10 +507,6 @@ if __name__ == '__main__':
             if "tpmet" in paramdict:
                 tpmon = TpMon()
                 monlist.append(tpmon)
-            paramcpy = paramdict
-            paramcpy["binary_test"] = False
-            handler = NetworkHandler(paramcpy)
-            handler.ensure_session_storage()
 
             # Run the network and monitor performance
             handler.run_with_monitors(monlist)
