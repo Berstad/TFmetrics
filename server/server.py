@@ -311,7 +311,7 @@ class NetworkHandler:
         x_data, y_data, classes = loadimg.getimagedataandlabels(binary_test_data_dir,
                                                                 nets[0].paramdict['imagedims'][0],
                                                                 nets[0].paramdict['imagedims'][1],
-                                                                verbose=False, rescale=255.,
+                                                                verbose=True,
                                                                 mode=testmode)
         if verbose_level == 1:
             print("************ Test data loading completed ************")

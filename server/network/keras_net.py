@@ -365,7 +365,7 @@ class KerasNet:
         self.x_data,self.y_data,self.classes = loadimg.getimagedataandlabels(self.test_data_dir,
                                                                              self.paramdict['imagedims'][0],
                                                                              self.paramdict['imagedims'][1],
-                                                                             verbose=False, rescale=255.,
+                                                                             verbose=True,
                                                                              mode=mode)
 
     def set_classes(self,classes):
