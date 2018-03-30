@@ -11,6 +11,10 @@ __email__ = "tjbersta@ifi.uio.no"
 __status__ = "Development"
 
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')
+# This allows matplotlib to run without an X backend,
+# not sure if displaying the plots will work like this
 import matplotlib.pyplot as plt
 import os
 import json

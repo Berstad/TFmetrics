@@ -489,8 +489,13 @@ if __name__ == '__main__':
     paramdir = os.path.dirname(os.path.abspath(__file__)) + "/param_files/"
     for directory, subdirectories, files in os.walk(paramdir, onerror=walkerror):
         for file in sorted(files):
+            print("Trying to open file:\n", file)
             monlist = []
-            paramdict = open_json(paramdir, file)
+            try:
+                paramdict = open_json(paramdir, file)
+            except ValueError:  # includes simplejson.decoder.JSONDecodeError
+                print("Could not open file\n",file,"\nIt is probably formatted incorrectly")
+                continue
             session = paramdict["session"]
             paramcpy = paramdict
             paramcpy["binary_test"] = False
