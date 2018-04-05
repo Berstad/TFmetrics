@@ -22,6 +22,8 @@ from keras.layers import Dense, GlobalAveragePooling2D
 from keras.preprocessing.image import ImageDataGenerator
 from keras.callbacks import ModelCheckpoint
 from keras import optimizers
+from keras.datasets import cifar10, cifar100, mnist
+from keras import backend as K
 from collections import Counter
 import os
 from keras.callbacks import EarlyStopping
@@ -232,6 +234,10 @@ class KerasNet:
         if self.verbose:
             print("Model weights loaded!")
 
+    # Should clear the session and free memory
+    def clear_session(self):
+        K.clear_session()
+
     def load_top_weights(self):
         # add the best weights from the train top model
         # at this point we have the pre-train weights of the base model and the trained weight of the new/added top model
@@ -373,6 +379,9 @@ class KerasNet:
 
     def set_test_data(self,x_data):
         self.x_data = x_data
+
+    def delete_model(self):
+        del self.model
 
     def test(self,testmode="custom_seq"):
         if self.verbose:

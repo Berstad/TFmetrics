@@ -24,7 +24,7 @@ import datetime
 # Plots my metric json files using pyplot
 # TODO: Write more comments here and make it not so awful, perhaps fix the way metrics are stored so that it makes more
 # sense with how Keras stores history. Also split into smaller functions
-def plot_json(combine, figname, filepath, verbose, gpu_specsdir,sys_specsdir, library, save=True, show = True, sessionid="testing"):
+def plot_json(combine, figname, filepath, verbose, gpu_specsdir, sys_specsdir, paramdictdir, library, save=True, show = True, sessionid="testing"):
     with open(filepath) as json_data:
         metrics = json.load(json_data)
     with open(os.path.dirname(os.path.abspath(__file__)) + "/metrics/dicts/units.json") as json_data:
@@ -33,6 +33,8 @@ def plot_json(combine, figname, filepath, verbose, gpu_specsdir,sys_specsdir, li
         gpu_specs = json.load(json_data)
     with open(sys_specsdir) as json_data:
         sys_specs = json.load(json_data)
+    with open(paramdictdir) as json_data:
+        paramdict = json.load(json_data)
     begin = metrics["0"]["0"]["time"]
     final = str(len(list(metrics[list(metrics.keys())[-1]].keys()))-5)
     if verbose:
@@ -68,14 +70,14 @@ def plot_json(combine, figname, filepath, verbose, gpu_specsdir,sys_specsdir, li
                         mets[met_index].append(np.mean(metrics[str(i)][str(j)][metric]))
                     else:
                         mets[met_index].append(metrics[str(i)][str(j)][metric])
-        #print(mets[met_index])
         met_avg = np.mean(mets[met_index])
         if len(mets[met_index])%2 != 0:
             mets[met_index].append(mets[met_index][-1])
-        polling_rate = (time_elapsed/1000)/len(mets[met_index])
-        polling_rate = round(polling_rate,1)
-        if polling_rate > 1:
-            polling_rate = round(polling_rate)
+        polling_rate = paramdict[translate_mets(library)]["polling_rate"]    
+        # polling_rate = (time_elapsed/1000)/len(mets[met_index])
+        # polling_rate = round(polling_rate,1)
+        # if polling_rate > 1:
+        #     polling_rate = round(polling_rate)
         if verbose:
             print("Polling rate: ", polling_rate,"s")
             print("Metric array length: ", len(mets[met_index]))
@@ -123,6 +125,14 @@ def plot_json(combine, figname, filepath, verbose, gpu_specsdir,sys_specsdir, li
         plt.suptitle(title)
         plt.tight_layout(rect=[0, 0.03, 1, 0.90])
         save_show(plt,library,sessionid,figname,show,save)
+
+# TODO: Do this in a very different way.
+def translate_mets(met_param):
+    return {
+        "nvmon": "nvmet",
+        "psmon": "psmet",
+        "tpmon": "tpmet",
+    }[met_param]
 
 # Plot history objects and in the future other callback objects from Keras
 def plot_history(combine, figname, filepath, verbose, library, save=True, show=True, sessionid="testing"):
