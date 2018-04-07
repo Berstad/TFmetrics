@@ -24,6 +24,7 @@ from keras.callbacks import ModelCheckpoint
 from keras import optimizers
 from keras.datasets import cifar10, cifar100, mnist
 from keras import backend as K
+from keras.utils import plot_model
 from collections import Counter
 import os
 from keras.callbacks import EarlyStopping
@@ -71,7 +72,7 @@ class KerasNet:
     fine_tune_optimizer = False
     calls = []
     train_class_weights = None
-    y_data = None
+    y_test = None
 
     def __init__(self,paramdict_in,calls=[],classname = ""):
         #the base model
@@ -111,9 +112,7 @@ class KerasNet:
                 self.test_data_dir = os.path.dirname(os.path.abspath(__file__)) + self.paramdict["test_data_dir"]
                 self.model_dir = os.path.dirname(os.path.abspath(__file__)) \
                                  + self.paramdict["model_dir"] + sessionname + "/"
-
             if self.verbose:
-                print(self.model.summary())
                 print("Initilialization complete")
             self.setup_completed = True
         except:
@@ -268,41 +267,63 @@ class KerasNet:
             print("Generating data")
         for layer in self.base_model.layers:
             layer.trainable = False
+        self.built_ins = ["cifar10","cifar100","mnist"]
 
-        # Read Data and Augment it: Make sure to select augmentations that are appropriate to your images.
-        # To save augmentations un-comment save lines and add to your flow parameters.
-        self.train_datagen = ImageDataGenerator(rescale=1. / 255,
-                                               #rotation_range=transformation_ratio,
-                                               #shear_range=transformation_ratio,
-                                               #zoom_range=transformation_ratio,
-                                               #cval=transformation_ratio,
-                                               horizontal_flip=True,
-                                               vertical_flip=True)
-        self.validation_datagen = ImageDataGenerator(rescale=1. / 255)
-        self.train_generator = self.train_datagen.flow_from_directory(self.train_data_dir,
-                                                                      #shuffle=False,
-                                                            target_size=(self.paramdict['imagedims'][0],
-                                                                         self.paramdict['imagedims'][1]),
-                                                            batch_size=self.paramdict['batch_size'],
-                                                            class_mode='categorical')
-        self.train_class_weights = self.get_class_weights(self.train_generator.classes)
+        if not any(x in self.paramdict["dataset"] for x in self.built_ins):
+            # Read Data and Augment it: Make sure to select augmentations that are appropriate to your images.
+            # To save augmentations un-comment save lines and add to your flow parameters.
+            self.train_datagen = ImageDataGenerator(rescale=1. / 255,
+                                                    rotation_range=10,
+                                                    width_shift_range=0.1,
+                                                    height_shift_range=0.1,
+                                                    horizontal_flip=True,
+                                                    vertical_flip=True)
+            self.validation_datagen = ImageDataGenerator(rescale=1. / 255)
+            self.train_generator = self.train_datagen.flow_from_directory(self.train_data_dir,
+                                                                          shuffle=True,
+                                                                          target_size=(self.paramdict['imagedims'][0],
+                                                                          self.paramdict['imagedims'][1]),
+                                                                          batch_size=self.paramdict['batch_size'],
+                                                                          class_mode='categorical')
+            self.train_class_weights = self.get_class_weights(self.train_generator.classes)
+
+            self.validation_generator = self.validation_datagen.flow_from_directory(self.validation_data_dir,
+                                                                                    shuffle=True,
+                                                                                    target_size=(self.paramdict['imagedims'][0],
+                                                                                                 self.paramdict['imagedims'][1]),
+                                                                                    batch_size=self.paramdict['batch_size'],
+                                                                                    class_mode='categorical')
+        else:
+            # This will setup datagenerators to train the network using cifar10, cifar100 or mnist
+            # This requires the correct attributes in the params file for nb_classes etc.
+            # TODO: Test this
+            if "cifar10" in self.paramdict["dataset"]:
+                (self.X_train, self.y_train), (X_test_presplit, y_test_presplit) = cifar10.load_data()
+            elif "cifar100" in self.paramdict["dataset"]:
+                (X_train, y_train), (X_test_presplit, y_test_presplit) = cifar100.load_data()
+            else:
+                (X_train, y_train), (X_test_presplit, y_test_presplit) = mnist.load_data()
+            self.X_valid = X_test_presplit[:len(X_test_presplit)/2]
+            self.X_test = X_test_presplit[len(X_test_presplit)/2:]
+            self.y_valid = y_test_presplit[:len(y_test_presplit)/2]
+            self.y_test = y_test_presplit[len(y_test_presplit)/2:]
+            self.y_train = np_utils.to_categorical(self.y_train, self.paramdict['nb_classes'])
+            self.y_valid = np_utils.to_categorical(self.y_valid, self.paramdict['nb_classes'])
+            self.y_test = np_utils.to_categorical(self.y_test, self.paramdict['nb_classes'])
+            self.train_datagen = ImageDataGenerator(rotation_range=10,  # randomly rotate images in the range (degrees, 0 to 180)
+                                                    width_shift_range=0.1,  # randomly shift images horizontally (fraction of total width)
+                                                    height_shift_range=0.1,  # randomly shift images vertically (fraction of total height)
+                                                    horizontal_flip=True,
+                                                    vertical_flip=True)
+            # compute quantities required for featurewise normalization
+            # (std, mean, and principal components if ZCA whitening is applied)
+            self.train_datagen.fit(self.X_train)
+            self.validation_datagen = ImageDataGenerator()
+            self.train_generator = self.train_datagen.flow(self.X_train, self.y_train, batch_size=self.paramdict['batch_size'])
+            self.train_class_weights = self.get_class_weights(self.train_generator.classes)
+            self.validation_generation = self.validation_datagen.flow(self.X_valid, self.y_valid, batch_size=self.paramdict['batch_size'])
         if self.verbose:
             print("Training classes: ", self.train_generator.class_indices)
-
-        # use the above 3 commented lines if you want to save and look at how the data augmentations look like
-        # TODO: Look at this, it seems wrong
-        if save_preview:
-            dir = os.path.dirname(os.path.abspath(__file__))  + self.paramdict["model_dir"] + "/preview/"
-            os.makedirs(dir, exist_ok=True)
-            self.model.save_to_dir(dir, save_prefix='aug', save_format='jpeg')
-
-        self.validation_generator = self.validation_datagen.flow_from_directory(self.validation_data_dir,
-                                                                                #shuffle=False,
-                                                                                target_size=(self.paramdict['imagedims'][0],
-                                                                                             self.paramdict['imagedims'][1]),
-                                                                                batch_size=self.paramdict['batch_size'],
-                                                                                class_mode='categorical')
-        if self.verbose:
             print("Validation classes: ",self.validation_generator.class_indices)
 
     def compile_setup(self,metrics):
@@ -368,7 +389,7 @@ class KerasNet:
         return history
 
     def load_test_data(self,mode = "binary_all"):
-        self.x_data,self.y_data,self.classes = loadimg.getimagedataandlabels(self.test_data_dir,
+        self.X_test,self.y_test,self.classes = loadimg.getimagedataandlabels(self.test_data_dir,
                                                                              self.paramdict['imagedims'][0],
                                                                              self.paramdict['imagedims'][1],
                                                                              verbose=True,
@@ -378,15 +399,18 @@ class KerasNet:
         self.classes = classes
 
     def set_test_data(self,x_data):
-        self.x_data = x_data
+        self.X_test = x_data
 
     def delete_model(self):
         del self.model
 
+    def save_model_vis(self, path, filename):
+        plot_model(self.model, to_file=path + filename, show_shapes=True)
+
     def test(self,testmode="custom_seq"):
         if self.verbose:
             print("Test classes: ", self.classes)
-            print("X_data shape: ", self.x_data.shape)
+            print("X_test shape: ", self.X_test.shape)
         if testmode == "scikit":
             self.test_generator = ImageDataGenerator()
             self.test_data_generator = self.test_generator.flow_from_directory(self.test_data_dir,
@@ -403,9 +427,8 @@ class KerasNet:
             return report
         elif testmode == "custom_seq":
             test_predictions = []
-            for i in range(len(self.x_data)):
-                 # x_l = np.expand_dims(self.x_data[i], axis=0)
-                 current = self.model.predict(self.x_data[i],verbose=0)
+            for i in range(len(self.X_test)):
+                 current = self.model.predict(self.X_test[i],verbose=0)
                  test_predictions.append(current[0])
                  if self.verbose and i%100 == 0:
                      print("Predicted sample " + str(i) + " as class " + str(test_predictions[i]))
@@ -413,7 +436,7 @@ class KerasNet:
                 print("Predictions completed: ", test_predictions.shape)
             return (self.classname,test_predictions)
         elif testmode == "custom_all":
-            test_predictions = self.model.predict(self.x_data)
+            test_predictions = self.model.predict(self.X_test)
             if self.verbose:
                 print("Predictions completed: ", test_predictions.shape)
             return (self.classname,test_predictions)
