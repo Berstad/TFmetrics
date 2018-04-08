@@ -71,7 +71,7 @@ class NetworkHandler:
     def setup_network(self, cls = None,test_only = False):
         time_callback = TimeHistory()
         callbacks = [time_callback]
-        net = KerasNet(self.paramdict, callbacks,cls)
+        net = KerasNet(self.paramdict, callbacks, cls)
         metrics = ['accuracy'] #kermet.fmeasure, kermet.recall, kermet.precision,
                    #kermet.matthews_correlation, kermet.true_pos,
                    #kermet.true_neg, kermet.false_pos, kermet.false_neg, kermet.specificity]
@@ -81,6 +81,8 @@ class NetworkHandler:
             net.compile_setup(metrics)
             path = os.path.dirname(os.path.abspath(__file__)) + '/metrics/storage/sessions/' + self.paramdict["session"] + "/"
             net.save_model_vis(path, "model_visualization_" + str(net.classname or '') + ".png")
+            print("Wrote model visualization to session folder " + self.paramdict["session"])
+            write_to_log("Wrote model visualization to session folder " + self.paramdict["session"])
         return net, time_callback
 
     def run_with_monitors(self, monitors=[]):
@@ -624,7 +626,7 @@ def ensure_session_storage(session):
 
 def write_to_log(line):
     to_print = "\n" + datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S') + " ** " + line
-    with open(os.path.dirname(os.path.abspath(__file__)) + "/log.txt", "a") as myfile:
+    with open(os.path.dirname(os.path.abspath(__file__)) + "/logs/" + "log_" + datetime.datetime.now().date().strftime('%Y-%m-%d') + ".txt", "a") as myfile:
         myfile.write(to_print)
 
 if __name__ == '__main__':

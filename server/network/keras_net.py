@@ -80,7 +80,10 @@ class KerasNet:
             self.verbose = True
         self.paramdict = paramdict_in
         self.calls = calls
-        self.classname = classname
+        if classname:
+            self.classname = classname
+        else:
+            self.classname = ""
         sessionname = paramdict_in["session"]
         try:
             self.optselect()
