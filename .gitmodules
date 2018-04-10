@@ -1,3 +1,6 @@
 [submodule "server/network/packages/images"]
 	path = server/network/packages/images
 	url = https://github.com/Berstad/images-direct-load-keras/
+[submodule "server/network/packages/customkeras"]
+	path = server/network/packages/customkeras
+	url = https://github.com/Berstad/keras
