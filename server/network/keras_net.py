@@ -24,7 +24,6 @@ from keras.callbacks import ModelCheckpoint
 from keras import optimizers
 from keras.datasets import cifar10, cifar100, mnist
 from keras import backend as K
-from keras.utils import plot_model
 from collections import Counter
 import os
 from keras.callbacks import EarlyStopping
@@ -33,7 +32,10 @@ import sys
 import time
 import numpy as np
 import network.packages.images.loadimg as loadimg
+import importlib
 import json
+from keras.utils.vis_utils import plot_model
+
 
 # From https://stackoverflow.com/questions/43178668/record-the-computation-time-for-each-epoch-in-keras-during-model-fit
 class TimeHistory(keras.callbacks.Callback):
@@ -408,7 +410,7 @@ class KerasNet:
         del self.model
 
     def save_model_vis(self, path, filename):
-        plot_model(self.model, to_file=path + filename, show_shapes=True)
+        plot_model(self.model, to_file=path + filename, show_shapes=True, show_layer_numbers=True)
 
     def test(self,testmode="custom_seq"):
         if self.verbose:

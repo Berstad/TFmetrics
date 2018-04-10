@@ -86,6 +86,7 @@ class NetworkHandler:
         return net, time_callback
 
     def run_with_monitors(self, monitors=[]):
+        setup = self.paramdict["setup"]
         train = self.paramdict["train"]
         fine_tune = self.paramdict["fine_tune"]
         test = self.paramdict["test"]
@@ -109,6 +110,34 @@ class NetworkHandler:
             print("Deleted nets to free memory")
             write_to_log("Deleted nets to free memory")
         else:
+            if setup:
+                if self.paramdict["network_type"] == "binary":
+                    classes = self.get_classes_from_folder("/network" + self.paramdict["train_data_dir"])
+                    print(classes)
+                    for cls in classes:
+                        net,time_callback = self.setup_network(cls)
+                        num_layers = len(net.model.layers)
+                        if net.setup_completed:
+                            print("Setup completed")
+                            write_to_log("Setup completed")
+                            print("Number of layers: ", num_layers)
+                            write_to_log("Number of layers: " + str(num_layers))
+                        net.clear_session()
+                        del net
+                        print("Deleted net to free memory")
+                        write_to_log("Deleted net to free memory")
+                else:
+                    net,time_callback = self.setup_network()
+                    num_layers = len(net.model.layers)
+                    if net.setup_completed:
+                        print("Setup completed")
+                        write_to_log("Setup completed")
+                        print("Number of layers: ", num_layers)
+                        write_to_log("Number of layers: " + str(num_layers))
+                    net.clear_session()
+                    del net
+                    print("Deleted net to free memory")
+                    write_to_log("Deleted net to free memory")
             if train:
                 if self.paramdict["network_type"] == "binary":
                     classes = self.get_classes_from_folder("/network" + self.paramdict["train_data_dir"])
@@ -667,7 +696,7 @@ if __name__ == '__main__':
                 try:
                     print("Started processing ", file)
                     write_to_log("Started processing " + str(file))
-                    if paramdict["train"] or paramdict["fine_tune"] or paramdict["test"]:
+                    if paramdict["setup"] or paramdict["train"] or paramdict["fine_tune"] or paramdict["test"]:
                         paramcpy = paramdict.copy()
                         paramcpy["binary_test"] = False
                         handler = NetworkHandler(paramcpy)
