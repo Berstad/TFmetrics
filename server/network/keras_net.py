@@ -35,6 +35,8 @@ import network.packages.images.loadimg as loadimg
 import importlib
 import json
 from keras.utils.vis_utils import plot_model
+from keras.utils.generic_utils import CustomObjectScope
+import sklearn.metrics as metrics
 
 
 # From https://stackoverflow.com/questions/43178668/record-the-computation-time-for-each-epoch-in-keras-during-model-fit
@@ -224,7 +226,8 @@ class KerasNet:
             print("Model selected!")
 
     def my_load_model(self, path):
-        self.model = load_model(path)
+        with CustomObjectScope({'relu6': keras.applications.mobilenet.relu6,'DepthwiseConv2D': keras.applications.mobilenet.DepthwiseConv2D}):
+            self.model = load_model(path)
         if self.verbose:
             print("Model loaded!")
 
@@ -393,13 +396,22 @@ class KerasNet:
         save_json(self.model.to_json(),self.model_dir,"fine_tune_model.json")
         return history
 
-    def load_test_data(self,mode = "binary_all"):
-        self.X_test,self.y_test,self.classes = loadimg.getimagedataandlabels(self.test_data_dir,
-                                                                             self.paramdict['imagedims'][0],
-                                                                             self.paramdict['imagedims'][1],
-                                                                             verbose=True,
-                                                                             mode=mode)
+    def load_test_data(self,mode = "binary_all", validation = False):
+        print("Loading test data")
+        if not validation:
+            self.X_test,self.y_test,self.classes = loadimg.getimagedataandlabels(self.test_data_dir,
+                                                                                 self.paramdict['imagedims'][0],
+                                                                                 self.paramdict['imagedims'][1],
+                                                                                 verbose=True,
+                                                                                 mode=mode)
+        else:
+            self.X_test,self.y_test,self.classes = loadimg.getimagedataandlabels(self.validation_data_dir,
+                                                                                 self.paramdict['imagedims'][0],
+                                                                                 self.paramdict['imagedims'][1],
+                                                                                 verbose=True,
+                                                                                 mode=mode)
 
+                       
     def set_classes(self,classes):
         self.classes = classes
 
@@ -417,18 +429,23 @@ class KerasNet:
             print("Test classes: ", self.classes)
             print("X_test shape: ", self.X_test.shape)
         if testmode == "scikit":
-            self.test_generator = ImageDataGenerator()
-            self.test_data_generator = self.test_generator.flow_from_directory(self.test_data_dir,
-                                                                                    target_size=(self.paramdict['imagedims'][0],
-                                                                                                 self.paramdict['imagedims'][1]),
-                                                                                    batch_size=self.paramdict['batch_size'],
-                                                                                    class_mode='categorical')
-            test_steps_per_epoch = np.math.ceil(self.test_data_generator.samples / self.test_data_generator.batch_size)
-            test_predictions = self.model.predict_generator(self.test_data_generator,steps=test_steps_per_epoch)
+            test_generator = ImageDataGenerator(rescale=1. / 255)
+            test_data_generator = test_generator.flow_from_directory(self.test_data_dir,
+                                                                     target_size=(self.paramdict['imagedims'][0],
+                                                                                  self.paramdict['imagedims'][1]),
+                                                                     batch_size=self.paramdict['batch_size'],
+                                                                     class_mode='categorical',
+                                                                     shuffle=False)
+            test_steps_per_epoch = np.math.ceil(test_data_generator.samples / test_data_generator.batch_size)
+            test_predictions = self.model.predict_generator(test_data_generator,steps=test_steps_per_epoch)
             predicted_classes = np.argmax(test_predictions,axis=1)
-            true_classes = self.test_data_generator.classes
-            class_labels = list(self.test_data_generator.class_indices.keys())
+            true_classes = test_data_generator.classes
+            class_labels = list(test_data_generator.class_indices.keys())
+            acc = metrics.accuracy_score(true_classes, predicted_classes)
+            conf_mat = metrics.confusion_matrix(true_classes, predicted_classes)
+            mcc = metrics.matthews_corrcoef(true_classes, predicted_classes)
             report = metrics.classification_report(true_classes, predicted_classes, target_names=class_labels)
+            report = report + "\nAccuracy: " + str(acc) + "\nMCC: " + str(mcc) + "\nConfusion matrix: \n" + str(conf_mat)
             return report
         elif testmode == "custom_seq":
             test_predictions = []

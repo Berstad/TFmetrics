@@ -92,6 +92,10 @@ class NetworkHandler:
         test = self.paramdict["test"]
         binary_test = self.paramdict["binary_test"]
         verbose_level = self.paramdict["verbose_level"]
+        if "num_tests" in self.paramdict:
+            num_tests = self.paramdict["num_tests"]
+        else:
+            num_tests = 10
         if binary_test:
             classes = self.get_classes_from_folder(self.paramdict["binary_test_data_dir"])
             print(classes)
@@ -105,7 +109,7 @@ class NetworkHandler:
                     write_to_log("Setup completed")
                     print("Number of layers: ", num_layers)
                     write_to_log("Number of layers: " + str(num_layers))
-            self.test_binary_nets(nets,monitors,"parallell",nets[0].paramdict["output_class_weights"])
+            self.test_binary_nets(nets,monitors,"parallell",nets[0].paramdict["output_class_weights"],num_tests = num_tests)
             del nets
             print("Deleted nets to free memory")
             write_to_log("Deleted nets to free memory")
@@ -215,7 +219,7 @@ class NetworkHandler:
                             print("Number of layers: ", num_layers)
                             write_to_log("Number of layers: " + str(num_layers))
                             self.calibrate(net, "test", monitors)
-                            self.test_net(net, monitors, net.paramdict["output_class_weights"])
+                            self.test_net(net, monitors, net.paramdict["output_class_weights"],num_tests=num_tests)
                             net.clear_session()
                         del net
                         print("Deleted net to free memory")
@@ -229,7 +233,7 @@ class NetworkHandler:
                         print("Number of layers: ", num_layers)
                         write_to_log("Number of layers: " + str(num_layers))
                         self.calibrate(net, "test", monitors)
-                        self.test_net(net, monitors, net.paramdict["output_class_weights"])
+                        self.test_net(net, monitors, net.paramdict["output_class_weights"],num_tests=num_tests)
                     del net
                     print("Deleted net to free memory")
                     write_to_log("Deleted net to free memory")
@@ -278,7 +282,10 @@ class NetworkHandler:
         sys_specsdir = rootdir + "/psmon/system_specs.json"
         paramdictdir = rootdir + "/params.json"
         metrics = [ name for name in os.listdir(rootdir) if os.path.isdir(os.path.join(rootdir, name)) ]
-
+        if verbose_level == 1:
+            verbose = True
+        else:
+            verbose = False
         for metric in metrics:
             for root, dirs, files in os.walk(rootdir + "/" + metric):
                 for filename in files:
@@ -287,11 +294,11 @@ class NetworkHandler:
                     if "hist" in filename and "png" not in filename:
                         testplotter.plot_history(True, filename,
                                                  rootdir + "/" + metric + "/" + filename,
-                                                 True, metric, save_figures, show_figures, session)
+                                                 verbose, metric, save_figures, show_figures, session)
                     elif "report" not in filename and "specs" not in filename and "png" not in filename and "times" not in filename:
                         testplotter.plot_json(True, filename,
                                               rootdir + "/" + metric + "/" + filename,
-                                              True, gpu_specsdir, sys_specsdir, paramdictdir,
+                                              verbose, gpu_specsdir, sys_specsdir, paramdictdir,
                                               metric, save_figures, show_figures, session)
 
     def calibrate(self, net, cal_phase, monitors):
@@ -366,6 +373,9 @@ class NetworkHandler:
         self.save_history(hist, "hist_"+phase+".json")
         self.save_times(time_callback, "times_"+phase+".json")
         if save_model:
+            net.load_model_weights(os.path.dirname(os.path.abspath(__file__))
+                                + "/network/model/" + dataset + "/" + session
+                                + "/model_weights.hdf5")
             if net.classname != "":
                 net.save_model(os.path.dirname(os.path.abspath(__file__))
                                + "/network/model/" + dataset + "/" + session
@@ -378,39 +388,32 @@ class NetworkHandler:
             print("************ Finished fine tuning net", net.classname, "************")
         write_to_log("Finished fine tuning for net " + net.classname)  
 
-    def test_net(self, net, monitors, output_weights=[],num_tests=10):
+    def test_net(self, net, monitors, output_weights=[], num_tests=10):
         verbose_level = self.paramdict["verbose_level"]
         train = self.paramdict["train"]
-        fine_tune = self.paramdict["fine_tune"]
-        if "weights_only" in paramdict:
-            weights_only = self.paramdict["weights_only"]
-        else:
-            weights_only = False        
+        fine_tune = self.paramdict["fine_tune"]     
         dataset = self.paramdict["dataset"]
         session = self.paramdict["session"]
         testmode = self.paramdict["testmode"]
+        if "threshold" in self.paramdict:
+            threshold = self.paramdict["threshold"]
+        else:
+            threshold = False
         if verbose_level == 1:
             print("************ Started testing net", net.classname, "************")
-        write_to_log("Started testing for net " + net.classname) 
+        write_to_log("Started testing for net " + net.classname)
+        report_dict = {}
         threads = []
         phase = "test"
         if net.classname != "":
             phase = phase + "_" + net.classname
-        if not train or not fine_tune:
-            if not weights_only:
-                if net.classname != "":
-                    net.my_load_model(os.path.dirname(os.path.abspath(__file__))
-                                      + "/network/model/" + dataset + "/" + session
-                                      + "/" + net.classname + "/model.h5")
-                else:
-                    net.my_load_model(os.path.dirname(os.path.abspath(__file__))
-                                      + "/network/model/" + dataset + "/" + session
-                                      + "/model.h5")
-            else:
-                net.load_model_weights(os.path.dirname(os.path.abspath(__file__))
-                                      + "/network/model/" + dataset + "/" + session
-                                      + "/model_weights.hdf5")
-        net.load_test_data(mode=testmode)
+        net.load_model_weights(os.path.dirname(os.path.abspath(__file__))
+                                + "/network/model/" + dataset + "/" + session
+                                + "/model_weights.hdf5")
+        net.load_test_data(mode=testmode,validation = True)
+        (valid_classname,valid_predictions) = net.test(testmode=testmode)
+        report, report_dict["validation"] = self.score_test(net.classes, valid_predictions, net.y_test, output_weights, times = [], elapsed_times = [] , fps_arr = [], threshold=threshold)
+        net.load_test_data(mode=testmode,validation = False)
         for monitor in monitors:
             thr = threading.Thread(target=monitor.start_monitoring, args=(self.paramdict, phase, self.paramdict["session"]))
             thr.deamon = True
@@ -433,7 +436,9 @@ class NetworkHandler:
         y_test = net.y_test
         for t in threads:
             t.do_run = False
-        report, report_dict = self.score_test(net.classes, predictions, y_test, output_weights, times, elapsed_times, fps_arr)
+        test_report, report_dict["test"] = self.score_test(net.classes, predictions, y_test, output_weights, times, elapsed_times, fps_arr, threshold)
+        sklearn_test_report = net.test(testmode = "scikit")
+        report = report + test_report + "\n Scikit report\n" + sklearn_test_report
         self.save_report(report, "report_"+phase+".txt")
         self.save_report_dict(report_dict, "report_"+phase+".json")
         if verbose_level == 1:
@@ -449,6 +454,10 @@ class NetworkHandler:
         dataset = self.paramdict["dataset"]
         session = self.paramdict["session"]
         phase = "binary_test"
+        if "threshold" in self.paramdict:
+            threshold = self.paramdict["threshold"]
+        else:
+            threshold = False
         self.calibrate(nets[0],phase,monitors)
         if verbose_level == 1:
             print("************ Started testing binary nets ************")
@@ -507,7 +516,7 @@ class NetworkHandler:
             t.do_run = False
         if verbose_level == 1:
             print("************ All predictions completed! Scoring test ************")
-        report,report_dict = self.score_test(classes, predictions, y_test, output_weights, times, elapsed_times, fps_arr)
+        report,report_dict = self.score_test(classes, predictions, y_test, output_weights, times, elapsed_times, fps_arr, threshold)
         if verbose_level == 1:
             print("************ Test scored, saving reports ************")
         self.save_report(report, "report_"+phase+".txt")
@@ -516,7 +525,7 @@ class NetworkHandler:
             print("************ Finished testing net binary nets ************")
         write_to_log("Finished testing binary nets")
 
-    def score_test(self, classes, test_predictions, y_test, output_weights, times, elapsed_times, fps_arr):
+    def score_test(self, classes, test_predictions, y_test, output_weights, times, elapsed_times, fps_arr, threshold):
         classlen = len(classes)
         tp = np.zeros(classlen) # pred = y_test =>
         tn = np.zeros(classlen) # pred = y_test =>
@@ -529,27 +538,46 @@ class NetworkHandler:
         f1 = np.zeros(classlen)
         mcc = np.zeros(classlen)
         total_per_class = np.zeros(classlen)
-        predicted = self.make_final_predictions(classes, test_predictions, output_weights)
+        predicted = self.make_final_predictions(classes, test_predictions, output_weights, threshold)
         y_test_conv = []
+        total_correct = 0
+        conf_mat = np.zeros((classlen,classlen))
         for i in range(len(predicted)):
-            total_per_class[predicted[i]] += 1
             y_test_conv.append(classes.index(y_test[i]))
+            correct_output = False
+            incorrect_output = False
+            true_class = classes.index(y_test[i])
             for j in range(classlen):
-                if j == classes.index(y_test[i]):
-                    if predicted[i] == j:
+                if j == true_class:
+                    if predicted[i,j]:
                         tp[j] += 1
+                        correct_output = True
+                        total_per_class[j] += 1
+                        conf_mat[true_class ,j] += 1
                     else:
                         fn[j] += 1
+                        incorrect_output = True
                 else:
-                    if predicted[i] == j:
+                    if predicted[i,j]:
                         fp[j] += 1
+                        incorrect_output = True
+                        total_per_class[j] += 1
+                        conf_mat[true_class ,j] += 1
                     else:
                         tn[j] += 1
+            if correct_output and not incorrect_output:
+                total_correct += 1
+        total_incorrect = len(predicted)-total_correct
+        trad_acc = total_correct/len(predicted)
         for i in range(len(classes)):
             tp[i], tn[i], fp[i], fn[i], recall[i], specificity[i], precision[i], accuracy[i], f1[i], mcc[i] = \
                 self.misc_measures(tp[i], tn[i], fp[i], fn[i])
-        conf_mat = metrics.confusion_matrix(predicted, y_test_conv)
-        report = "Test classes: " + str(classes) + "\n" \
+        report = "Report time: " \
+                 + datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S') + "\n" \
+                 + "Test classes: " + str(classes) + "\n" \
+                 + "Total correct: " + str(total_correct) + "\n" \
+                 + "Total incorrect: " + str(total_incorrect) + "\n" \
+                 + "Traditional accuracy: " + str(trad_acc) + "\n" \
                  + "*************************\n" \
                  + "True Pos: " + str(tp) + "\n" \
                  + "Avg: " + str(np.mean(tp)) + "\n" \
@@ -603,19 +631,43 @@ class NetworkHandler:
                        "confusion": conf_mat,
                        "times": times,
                        "elapsed_times": elapsed_times,
-                       "fps_arr": fps_arr}
-        write_to_log("Test completed, results summary: \n Avg Test Acc: " + str(np.mean(accuracy)) + ", Avg F1: " + str(np.mean(f1)) + ", Avg MCC: " + str(np.mean(mcc)) + ", Avg FPS: " + str(np.mean(fps_arr)))
+                       "fps_arr": fps_arr,
+                       "total_correct": total_correct,
+                       "total_incorrect": total_incorrect,
+                       "trad_acc": trad_acc}
+        print("Test completed, results summary: \n Avg Test Acc: "
+                     + str(np.mean(accuracy))
+                     + ", Traditional Accuracy: " + str(trad_acc)
+                     + ", Avg F1: " + str(np.mean(f1))
+                     + ", Avg MCC: " + str(np.mean(mcc))
+                     + ", Avg FPS: " + str(np.mean(fps_arr)))
+        write_to_log("Test completed, results summary: \n Avg Test Acc: "
+                     + str(np.mean(accuracy))
+                     + ", Traditional Accuracy: " + str(trad_acc)
+                     + ", Avg F1: " + str(np.mean(f1))
+                     + ", Avg MCC: " + str(np.mean(mcc))
+                     + ", Avg FPS: " + str(np.mean(fps_arr)))
         return report, report_dict
 
-    def make_final_predictions(self, classes, test_predictions, output_weights):
+    def make_final_predictions(self, classes, test_predictions, output_weights, threshold = False):
         verbose_level = self.paramdict["verbose_level"]
         network_type = self.paramdict["network_type"]
         binary_test = self.paramdict["binary_test"]
+        if "binary_multiple" in self.paramdict:
+            binary_multiple = self.paramdict["binary_multiple"]
+        else:
+            binary_multiple = False
         if verbose_level == 1:
             print("Making final predictions")
         if network_type == "multiclass":
             predicted = np.multiply(test_predictions, np.asarray(output_weights))
-            predicted = np.argmax(predicted, axis=1)
+            if not threshold:
+                predicted_ind = np.argmax(predicted, axis=1)
+                predicted = np.zeros(predicted.shape,dtype=bool)
+                for i in range(len(predicted_ind)):
+                    predicted[i,predicted_ind[i]] = True
+            else:
+                predicted = predicted > threshold
         elif network_type == "binary" and binary_test:
             print(len(test_predictions))
             print(test_predictions[0])
@@ -627,12 +679,27 @@ class NetworkHandler:
                 for i in range(len(predictions[1])):
                     predicted[i][index] = predictions[1][i][1]
             predicted = np.multiply(predicted, np.asarray(output_weights))
-            predicted = np.argmax(predicted, axis=1)
+            if not threshold:
+                predicted_ind = np.argmax(predicted, axis=1)
+                predicted = np.zeros(predicted.shape,dtype=bool)
+                for i in range(len(predicted_ind)):
+                    predicted[i,predicted_ind[i]] = True               
+            else:
+                predicted = predicted > threshold
         elif not binary_test:
-            predicted = np.argmax(test_predictions, axis=1)
+            if not threshold:
+                predicted_ind = np.argmax(predicted, axis=1)
+                predicted = np.zeros(predicted.shape,dtype=bool)
+                for i in range(len(predicted_ind)):
+                    predicted[i,predicted_ind[i]] = True
+            else:
+                predicted = predicted > threshold
         else:
             predicted = np.multiply(test_predictions, np.asarray(output_weights))
-            predicted = np.argmax(predicted, axis=1)
+            predicted_ind = np.argmax(predicted, axis=1)
+            predicted = np.zeros(predicted.shape,dtype=bool)
+            for i in range(len(predicted_ind)):
+                predicted[i,predicted_ind[i]] = True        
         return predicted
 
     '''Non-keras method written by Konstantin: Used for test'''
