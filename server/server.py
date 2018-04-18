@@ -98,6 +98,27 @@ class NetworkHandler:
             num_tests = self.paramdict["num_tests"]
         else:
             num_tests = 10
+        if "binary_val_test" in self.paramdict:
+            binary_val_test = self.paramdict["binary_val_test"]
+        else:
+            binary_val_test = False
+        if binary_val_test:
+            classes = self.get_classes_from_folder("/network" + self.paramdict["binary_test_data_dir"])
+            print(classes)
+            nets = []
+            for cls in classes:
+                net,time_callback = self.setup_network(cls)
+                nets.append(net)
+                num_layers = len(net.model.layers)
+                if net.setup_completed:
+                    print("Setup completed")
+                    write_to_log("Setup completed")
+                    print("Number of layers: ", num_layers)
+                    write_to_log("Number of layers: " + str(num_layers))
+            self.test_binary_nets(nets,monitors,"parallell",self.paramdict["output_class_weights"],num_tests = num_tests, val = True)
+            del nets
+            print("Deleted nets to free memory")
+            write_to_log("Deleted nets to free memory")
         if binary_test:
             classes = self.get_classes_from_folder("/network" + self.paramdict["binary_test_data_dir"])
             print(classes)
@@ -111,7 +132,7 @@ class NetworkHandler:
                     write_to_log("Setup completed")
                     print("Number of layers: ", num_layers)
                     write_to_log("Number of layers: " + str(num_layers))
-            self.test_binary_nets(nets,monitors,"parallell",self.paramdict["output_class_weights"],num_tests = num_tests)
+            self.test_binary_nets(nets,monitors,"parallell",self.paramdict["output_class_weights"],num_tests = num_tests, val = False)
             del nets
             print("Deleted nets to free memory")
             write_to_log("Deleted nets to free memory")
@@ -297,7 +318,7 @@ class NetworkHandler:
                         testplotter.plot_history(True, filename,
                                                  rootdir + "/" + metric + "/" + filename,
                                                  False, metric, save_figures, show_figures, session)
-                    elif "report" not in filename and "specs" not in filename and "png" not in filename and "times" not in filename:
+                    elif "report" not in filename and "specs" not in filename and "predictions" not in filename and "png" not in filename and "times" not in filename:
                         testplotter.plot_json(True, filename,
                                               rootdir + "/" + metric + "/" + filename,
                                               False, gpu_specsdir, sys_specsdir, paramdictdir,
@@ -428,6 +449,7 @@ class NetworkHandler:
             print("************ Started testing net on validation set ************")
         write_to_log("Started testing net on validation set")
         (valid_classname,valid_predictions,valid_true,valid_class_labels) = net.test(testmode="validdatagen")
+        self.save_predictions("validation", valid_classname, valid_predictions, valid_true, valid_class_labels)
         report, report_dict["validation"] = self.score_test(valid_class_labels,
                                                             valid_predictions,
                                                             valid_true,
@@ -444,6 +466,7 @@ class NetworkHandler:
             print("************ Started testing net on test set ************")
         write_to_log("Started testing net on test set")
         (classname, predictions, y_test, class_labels) = net.test(testmode="testdatagen")
+        self.save_predictions("test", classname, predictions, y_test, class_labels)
         if verbose_level == 1:
             print("************ Finished accuracy test on test set ************")
         write_to_log("Finished accuracy test on test set")
@@ -520,13 +543,17 @@ class NetworkHandler:
     
     # This method must be run after training and fine tuning, and preferably after testing the individual nets
     # TODO: Change keras_net.py so that this will work with MNIST, CIFAR etc.
-    def test_binary_nets(self, nets, monitors, mode = "parallell",output_weights = [],num_tests=10):
+    def test_binary_nets(self, nets, monitors, mode = "parallell", output_weights = [], num_tests=10, val=False):
         verbose_level = self.paramdict["verbose_level"]
         binary_test_data_dir = os.path.dirname(os.path.abspath(__file__)) + "/network" + self.paramdict["binary_test_data_dir"]
+        if val:
+            binary_test_data_dir = os.path.dirname(os.path.abspath(__file__)) + "/network" + self.paramdict["binary_val_test_data_dir"]
         testmode = self.paramdict["testmode"]
         dataset = self.paramdict["dataset"]
         session = self.paramdict["session"]
         phase = "binary_test"
+        if val:
+            phase = "binary_val_test"
         if "threshold" in self.paramdict:
             threshold = self.paramdict["threshold"]
         else:
@@ -550,6 +577,10 @@ class NetworkHandler:
             net.setup_binary_test(self.test_data_generator)
             returned = net.test("binary_testdatagen")
             predictions[class_labels.index(net.classname)] = returned
+        if val:
+            self.save_predictions("binary_val_test", False, predictions, true_test_classes, class_labels)
+        else:
+            self.save_predictions("binary_test", False, predictions, true_test_classes, class_labels)
         if verbose_level == 1:
             print(class_labels)
         if verbose_level == 1:
@@ -809,6 +840,16 @@ class NetworkHandler:
         mcc=(float(tp*tn-fp*fn)/math.sqrt(float(tp+fp)*float(tp+fn)*float(tn+fp)*float(tn+fn))) if (float(tp+fp)*float(tp+fn)*float(tn+fp)*float(tn+fn)) > 0 else 0.
         return tp, tn, fp, fn, recall, specificity, precision, accuracy, f1, mcc
 
+    def save_predictions(self, phase, classname, predictions, true_class_labels, class_labels):
+        pre_dict = {"predictions": predictions,
+                    "true_class_labels": true_class_labels,
+                    "class_labels": class_labels}
+        dir_string = "predictions_" + phase
+        if classname:
+            pre_dict["classname"] = classname
+            dir_string = dir_string + "_" + classname
+        self.save_report_dict(pre_dict, dir_string + ".json")
+
 def ensure_session_storage(session):
     directory = os.path.dirname(os.path.abspath(__file__)) + '/metrics/storage/sessions/' \
                 + session + "/"
@@ -863,6 +904,8 @@ if __name__ == '__main__':
                     if paramdict["setup"] or paramdict["train"] or paramdict["fine_tune"] or paramdict["test"]:
                         paramcpy = paramdict.copy()
                         paramcpy["binary_test"] = False
+                        if "binary_val_test" in paramcpy:
+                            paramcpy["binary_val_test"] = False
                         handler = NetworkHandler(paramcpy)
                         # Run the network and monitor performance
                         handler.run_with_monitors(monlist)
