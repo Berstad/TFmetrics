@@ -5,6 +5,8 @@ server/network/datasets/cifar-100/
 server/network/datasets/kvasir/
 server/network/datasets/kvasir-dataset-v2/
 server/network/datasets/kvasir-nerthus-combined/
+server/network/datasets/nerthus-dataset-frames/
+server/network/datasets/nerthus-rune/
 server/network/datasets/nerthus/
 server/network/model/cifar-100/
 server/network/model/kvasir/
@@ -26,6 +28,7 @@ server/network/tf-learning-example.py
 !/server/network/datasets/kvasir/params_binary.json
 !/server/network/datasets/kvasir/params_multiclass.json
 server/network/datasets/mnist/
-/server/logs/
+server/logs/
 server/database/
 server/network/datasets/kvasir-dataset-v2-features/
+server/param_files/

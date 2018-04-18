@@ -31,12 +31,10 @@ import keras
 import sys
 import time
 import numpy as np
-import network.packages.images.loadimg as loadimg
 import importlib
 import json
 from keras.utils.vis_utils import plot_model
 from keras.utils.generic_utils import CustomObjectScope
-import sklearn.metrics as metrics
 
 
 # From https://stackoverflow.com/questions/43178668/record-the-computation-time-for-each-epoch-in-keras-during-model-fit
@@ -76,7 +74,6 @@ class KerasNet:
     fine_tune_optimizer = False
     calls = []
     train_class_weights = None
-    y_test = None
 
     def __init__(self,paramdict_in,calls=[],classname = ""):
         #the base model
@@ -287,6 +284,7 @@ class KerasNet:
                                                     horizontal_flip=True,
                                                     vertical_flip=True)
             self.validation_datagen = ImageDataGenerator(rescale=1. / 255)
+            self.test_datagen = ImageDataGenerator(rescale=1. / 255)
             self.train_generator = self.train_datagen.flow_from_directory(self.train_data_dir,
                                                                           shuffle=True,
                                                                           target_size=(self.paramdict['imagedims'][0],
@@ -294,13 +292,21 @@ class KerasNet:
                                                                           batch_size=self.paramdict['batch_size'],
                                                                           class_mode='categorical')
             self.train_class_weights = self.get_class_weights(self.train_generator.classes)
+            self.classes = list(self.train_generator.class_indices.keys())
 
             self.validation_generator = self.validation_datagen.flow_from_directory(self.validation_data_dir,
-                                                                                    shuffle=True,
+                                                                                    shuffle=False,
                                                                                     target_size=(self.paramdict['imagedims'][0],
                                                                                                  self.paramdict['imagedims'][1]),
                                                                                     batch_size=self.paramdict['batch_size'],
                                                                                     class_mode='categorical')
+            
+            self.test_data_generator = self.test_datagen.flow_from_directory(self.test_data_dir,
+                                                                         target_size=(self.paramdict['imagedims'][0],
+                                                                                      self.paramdict['imagedims'][1]),
+                                                                         batch_size=self.paramdict['batch_size'],
+                                                                         class_mode='categorical',
+                                                                         shuffle=False)
         else:
             # This will setup datagenerators to train the network using cifar10, cifar100 or mnist
             # This requires the correct attributes in the params file for nb_classes etc.
@@ -327,9 +333,13 @@ class KerasNet:
             # (std, mean, and principal components if ZCA whitening is applied)
             self.train_datagen.fit(self.X_train)
             self.validation_datagen = ImageDataGenerator()
-            self.train_generator = self.train_datagen.flow(self.X_train, self.y_train, batch_size=self.paramdict['batch_size'])
+            self.train_generator = self.train_datagen.flow(self.X_train,
+                                                           self.y_train,
+                                                           batch_size=self.paramdict['batch_size'])
             self.train_class_weights = self.get_class_weights(self.train_generator.classes)
-            self.validation_generation = self.validation_datagen.flow(self.X_valid, self.y_valid, batch_size=self.paramdict['batch_size'])
+            self.validation_generator = self.validation_datagen.flow(self.X_valid,
+                                                                      self.y_valid,
+                                                                      batch_size=self.paramdict['batch_size'])
         if self.verbose:
             print("Training classes: ", self.train_generator.class_indices)
             print("Validation classes: ",self.validation_generator.class_indices)
@@ -395,28 +405,9 @@ class KerasNet:
                                 class_weight=self.train_class_weights)
         save_json(self.model.to_json(),self.model_dir,"fine_tune_model.json")
         return history
-
-    def load_test_data(self,mode = "binary_all", validation = False):
-        print("Loading test data")
-        if not validation:
-            self.X_test,self.y_test,self.classes = loadimg.getimagedataandlabels(self.test_data_dir,
-                                                                                 self.paramdict['imagedims'][0],
-                                                                                 self.paramdict['imagedims'][1],
-                                                                                 verbose=True,
-                                                                                 mode=mode)
-        else:
-            self.X_test,self.y_test,self.classes = loadimg.getimagedataandlabels(self.validation_data_dir,
-                                                                                 self.paramdict['imagedims'][0],
-                                                                                 self.paramdict['imagedims'][1],
-                                                                                 verbose=True,
-                                                                                 mode=mode)
-
                        
     def set_classes(self,classes):
         self.classes = classes
-
-    def set_test_data(self,x_data):
-        self.X_test = x_data
 
     def delete_model(self):
         del self.model
@@ -424,47 +415,30 @@ class KerasNet:
     def save_model_vis(self, path, filename):
         plot_model(self.model, to_file=path + filename, show_shapes=True, show_layer_numbers=True)
 
-    def test(self,testmode="custom_seq"):
+    def test(self,testmode="testdatagen"):
         if self.verbose:
             print("Test classes: ", self.classes)
-            print("X_test shape: ", self.X_test.shape)
-        if testmode == "scikit":
-            test_generator = ImageDataGenerator(rescale=1. / 255)
-            test_data_generator = test_generator.flow_from_directory(self.test_data_dir,
-                                                                     target_size=(self.paramdict['imagedims'][0],
-                                                                                  self.paramdict['imagedims'][1]),
-                                                                     batch_size=self.paramdict['batch_size'],
-                                                                     class_mode='categorical',
-                                                                     shuffle=False)
-            test_steps_per_epoch = np.math.ceil(test_data_generator.samples / test_data_generator.batch_size)
-            test_predictions = self.model.predict_generator(test_data_generator,steps=test_steps_per_epoch)
-            predicted_classes = np.argmax(test_predictions,axis=1)
-            true_classes = test_data_generator.classes
-            class_labels = list(test_data_generator.class_indices.keys())
-            acc = metrics.accuracy_score(true_classes, predicted_classes)
-            conf_mat = metrics.confusion_matrix(true_classes, predicted_classes)
-            mcc = metrics.matthews_corrcoef(true_classes, predicted_classes)
-            report = metrics.classification_report(true_classes, predicted_classes, target_names=class_labels)
-            report = report + "\nAccuracy: " + str(acc) + "\nMCC: " + str(mcc) + "\nConfusion matrix: \n" + str(conf_mat)
-            return report
-        elif testmode == "custom_seq":
-            test_predictions = []
-            for i in range(len(self.X_test)):
-                 current = self.model.predict(self.X_test[i],verbose=0)
-                 test_predictions.append(current[0])
-                 if self.verbose and i%100 == 0:
-                     print("Predicted sample " + str(i) + " as class " + str(test_predictions[i]))
-            if self.verbose:
-                print("Predictions completed: ", test_predictions.shape)
-            return (self.classname,test_predictions)
-        elif testmode == "custom_all":
-            test_predictions = self.model.predict(self.X_test)
-            if self.verbose:
-                print("Predictions completed: ", test_predictions.shape)
+        if "testdatagen" in testmode:
+            test_steps_per_epoch = np.math.ceil(self.test_data_generator.samples / self.test_data_generator.batch_size)
+            test_predictions = self.model.predict_generator(self.test_data_generator,steps=test_steps_per_epoch)
+            test_true_classes = self.test_data_generator.classes
+            class_labels = list(self.test_data_generator.class_indices.keys())
+            return (self.classname, test_predictions, test_true_classes, class_labels)
+        elif "validdatagen" in testmode:
+            test_steps_per_epoch = np.math.ceil(self.validation_generator.samples / self.validation_generator.batch_size)
+            valid_predictions = self.model.predict_generator(self.validation_generator, steps=test_steps_per_epoch)
+            valid_true_classes = self.validation_generator.classes
+            class_labels = list(self.validation_generator.class_indices.keys())
+            return (self.classname, valid_predictions, valid_true_classes, class_labels)
+        elif "binary_testdatagen" in testmode:
+            test_steps_per_epoch = np.math.ceil(self.test_data_generator.samples / self.test_data_generator.batch_size)
+            test_predictions = self.model.predict_generator(self.test_data_generator,steps=test_steps_per_epoch)
             return (self.classname,test_predictions)
         else:
             print("Invalid testmode!")
 
+    def setup_binary_test(self, test_data_generator):
+        self.test_data_generator = test_data_generator
 
 def save_json(obj, path,name):
     os.makedirs(path, exist_ok=True)

@@ -26,11 +26,13 @@ import math
 import numpy as np
 import time
 import datetime
-import network.packages.images.loadimg as loadimg
 from network.keras_net import KerasNet, TimeHistory
+import network.packages.images.loadimg as loadimg
 from multiprocessing.pool import ThreadPool
 import argparse
 import traceback
+import sklearn.metrics as metrics
+from keras.preprocessing.image import ImageDataGenerator
 
 app = Flask(__name__)
 
@@ -97,7 +99,7 @@ class NetworkHandler:
         else:
             num_tests = 10
         if binary_test:
-            classes = self.get_classes_from_folder(self.paramdict["binary_test_data_dir"])
+            classes = self.get_classes_from_folder("/network" + self.paramdict["binary_test_data_dir"])
             print(classes)
             nets = []
             for cls in classes:
@@ -109,7 +111,7 @@ class NetworkHandler:
                     write_to_log("Setup completed")
                     print("Number of layers: ", num_layers)
                     write_to_log("Number of layers: " + str(num_layers))
-            self.test_binary_nets(nets,monitors,"parallell",nets[0].paramdict["output_class_weights"],num_tests = num_tests)
+            self.test_binary_nets(nets,monitors,"parallell",self.paramdict["output_class_weights"],num_tests = num_tests)
             del nets
             print("Deleted nets to free memory")
             write_to_log("Deleted nets to free memory")
@@ -211,7 +213,7 @@ class NetworkHandler:
                     classes = self.get_classes_from_folder("/network" + self.paramdict["train_data_dir"])
                     print(classes)
                     for cls in classes:
-                        net,time_callback = self.setup_network(cls,True)
+                        net,time_callback = self.setup_network(cls)
                         num_layers = len(net.model.layers)
                         if net.setup_completed:
                             print("Setup completed")
@@ -220,12 +222,12 @@ class NetworkHandler:
                             write_to_log("Number of layers: " + str(num_layers))
                             self.calibrate(net, "test", monitors)
                             self.test_net(net, monitors, net.paramdict["output_class_weights"],num_tests=num_tests)
-                            net.clear_session()
+                        net.clear_session()
                         del net
                         print("Deleted net to free memory")
                         write_to_log("Deleted net to free memory")
                 else:
-                    net,time_callback = self.setup_network(test_only=True)
+                    net,time_callback = self.setup_network()
                     num_layers = len(net.model.layers)
                     if net.setup_completed:
                         print("Setup completed")
@@ -294,11 +296,11 @@ class NetworkHandler:
                     if "hist" in filename and "png" not in filename:
                         testplotter.plot_history(True, filename,
                                                  rootdir + "/" + metric + "/" + filename,
-                                                 verbose, metric, save_figures, show_figures, session)
+                                                 False, metric, save_figures, show_figures, session)
                     elif "report" not in filename and "specs" not in filename and "png" not in filename and "times" not in filename:
                         testplotter.plot_json(True, filename,
                                               rootdir + "/" + metric + "/" + filename,
-                                              verbose, gpu_specsdir, sys_specsdir, paramdictdir,
+                                              False, gpu_specsdir, sys_specsdir, paramdictdir,
                                               metric, save_figures, show_figures, session)
 
     def calibrate(self, net, cal_phase, monitors):
@@ -373,14 +375,17 @@ class NetworkHandler:
         self.save_history(hist, "hist_"+phase+".json")
         self.save_times(time_callback, "times_"+phase+".json")
         if save_model:
-            net.load_model_weights(os.path.dirname(os.path.abspath(__file__))
-                                + "/network/model/" + dataset + "/" + session
-                                + "/model_weights.hdf5")
             if net.classname != "":
+                net.load_model_weights(os.path.dirname(os.path.abspath(__file__))
+                                + "/network/model/" + dataset + "/" + session
+                                + "/" + net.classname + "/model_weights.hdf5")
                 net.save_model(os.path.dirname(os.path.abspath(__file__))
                                + "/network/model/" + dataset + "/" + session
                                + "/" + net.classname + "/model.h5")
             else:
+                net.load_model_weights(os.path.dirname(os.path.abspath(__file__))
+                                + "/network/model/" + dataset + "/" + session
+                                + "/model_weights.hdf5")
                 net.save_model(os.path.dirname(os.path.abspath(__file__))
                                + "/network/model/" + dataset + "/" + session
                                + "/model.h5")
@@ -395,6 +400,11 @@ class NetworkHandler:
         dataset = self.paramdict["dataset"]
         session = self.paramdict["session"]
         testmode = self.paramdict["testmode"]
+        test_data_dir = os.path.dirname(os.path.abspath(__file__)) \
+                        + "/network" + self.paramdict["test_data_dir"]
+        network_type = self.paramdict["network_type"]
+        if "binary" in network_type:
+            test_data_dir = test_data_dir + "/" + net.classname + "/"
         if "threshold" in self.paramdict:
             threshold = self.paramdict["threshold"]
         else:
@@ -407,49 +417,112 @@ class NetworkHandler:
         phase = "test"
         if net.classname != "":
             phase = phase + "_" + net.classname
-        net.load_model_weights(os.path.dirname(os.path.abspath(__file__))
-                                + "/network/model/" + dataset + "/" + session
-                                + "/model_weights.hdf5")
-        net.load_test_data(mode=testmode,validation = True)
-        (valid_classname,valid_predictions) = net.test(testmode=testmode)
-        report, report_dict["validation"] = self.score_test(net.classes, valid_predictions, net.y_test, output_weights, times = [], elapsed_times = [] , fps_arr = [], threshold=threshold)
-        net.load_test_data(mode=testmode,validation = False)
+            net.load_model_weights(os.path.dirname(os.path.abspath(__file__))
+                                    + "/network/model/" + dataset + "/" + session
+                                    + "/" + net.classname + "/model_weights.hdf5")
+        else:
+            net.load_model_weights(os.path.dirname(os.path.abspath(__file__))
+                                    + "/network/model/" + dataset + "/" + session
+                                    + "/model_weights.hdf5")
+        if verbose_level == 1:
+            print("************ Started testing net on validation set ************")
+        write_to_log("Started testing net on validation set")
+        (valid_classname,valid_predictions,valid_true,valid_class_labels) = net.test(testmode="validdatagen")
+        report, report_dict["validation"] = self.score_test(valid_class_labels,
+                                                            valid_predictions,
+                                                            valid_true,
+                                                            output_weights,
+                                                            times = [],
+                                                            elapsed_times = [],
+                                                            fps_arr = [],
+                                                            threshold=threshold)
+        sklearn_valid_report = self.sklearn_score(valid_predictions, valid_true, valid_class_labels)
+        if verbose_level == 1:
+            print("************ Finished testing net on validation set ************")
+        write_to_log("Finished testing net on validation set")
+        if verbose_level == 1:
+            print("************ Started testing net on test set ************")
+        write_to_log("Started testing net on test set")
+        (classname, predictions, y_test, class_labels) = net.test(testmode="testdatagen")
+        if verbose_level == 1:
+            print("************ Finished accuracy test on test set ************")
+        write_to_log("Finished accuracy test on test set")
+        times = []
+        elapsed_times = []
+        fps_arr = []
+        built_ins = ["cifar10","cifar100","mnist"]
+        if verbose_level == 1:
+            print("************ Started FPS testing net on test set ************")
+        write_to_log("Started FPS testing net on test set")
+        if verbose_level == 1:
+            print("************ Trying to open test data for FPS from: ", test_data_dir, "************")
+        write_to_log("Trying to open test data for FPS from: " + test_data_dir)
+        if not any(x in dataset for x in built_ins):
+            fps_X_test, fps_y_test, classes = loadimg.getimagedataandlabels(test_data_dir,
+                                                                            net.paramdict['imagedims'][0],
+                                                                            net.paramdict['imagedims'][1],
+                                                                            verbose=True,
+                                                                            mode=testmode)
         for monitor in monitors:
             thr = threading.Thread(target=monitor.start_monitoring, args=(self.paramdict, phase, self.paramdict["session"]))
             thr.deamon = True
             thr.do_run = True
             thr.start()
             threads.append(thr)
-        times = []
-        elapsed_times = []
-        fps_arr = []
         for i in range (num_tests):
-            print("******** Predictions test: ", str(i+1),"*********")
+            print("******** FPS Predictions test: ", str(i+1),"*********")
             start_time = (round(time.time() * 1000))
-            (classname,predictions) = net.test(testmode=testmode)
+            fps_pred = net.model.predict(fps_X_test, verbose=0)
             end_time = int(round(time.time() * 1000))
             times.append((start_time,end_time))
             time_elapsed = end_time - start_time
             elapsed_times.append(time_elapsed)
-            fps = len(net.X_test)/(time_elapsed/1000)
+            fps = len(fps_pred)/(time_elapsed/1000)
             fps_arr.append(fps)
-        y_test = net.y_test
         for t in threads:
             t.do_run = False
-        test_report, report_dict["test"] = self.score_test(net.classes, predictions, y_test, output_weights, times, elapsed_times, fps_arr, threshold)
-        sklearn_test_report = net.test(testmode = "scikit")
-        report = report + test_report + "\n Scikit report\n" + sklearn_test_report
+        if verbose_level == 1:
+            print("************ Finished FPS testing net on test set, generating report ************")
+        write_to_log("Finished FPS testing net on test set, generating report")
+        test_report, report_dict["test"] = self.score_test(class_labels,
+                                                           predictions,
+                                                           y_test,
+                                                           output_weights,
+                                                           times,
+                                                           elapsed_times,
+                                                           fps_arr,
+                                                           threshold)
+        sklearn_test_report = self.sklearn_score(predictions, y_test, class_labels)
+        report = "VALIDATION: \n" + report + "\n Scikit report\n" + sklearn_valid_report \
+                 + "\nTEST: \n" + test_report + "\n Scikit report\n" + sklearn_test_report
         self.save_report(report, "report_"+phase+".txt")
         self.save_report_dict(report_dict, "report_"+phase+".json")
         if verbose_level == 1:
             print("************ Finished testing net", net.classname, "************")
         write_to_log("Finshed testing for net " + net.classname) 
 
+
+    def optimize_threshold(self, sesssion, net, mode = "binary-search", variable = "trad_acc"):
+        pass
+
+        
+    def make_binary_test_generator(self,binary_test_data_dir):
+        self.test_datagen = ImageDataGenerator(rescale=1. / 255)
+        self.test_data_generator = self.test_datagen.flow_from_directory(binary_test_data_dir,
+                                                                         target_size=(self.paramdict['imagedims'][0],
+                                                                                      self.paramdict['imagedims'][1]),
+                                                                         batch_size=self.paramdict['batch_size'],
+                                                                         class_mode='categorical',
+                                                                         shuffle=False)
+        test_true_classes = self.test_data_generator.classes
+        class_labels = list(self.test_data_generator.class_indices.keys())
+        return test_true_classes, class_labels
+    
     # This method must be run after training and fine tuning, and preferably after testing the individual nets
     # TODO: Change keras_net.py so that this will work with MNIST, CIFAR etc.
     def test_binary_nets(self, nets, monitors, mode = "parallell",output_weights = [],num_tests=10):
         verbose_level = self.paramdict["verbose_level"]
-        binary_test_data_dir = os.path.dirname(os.path.abspath(__file__)) + self.paramdict["binary_test_data_dir"]
+        binary_test_data_dir = os.path.dirname(os.path.abspath(__file__)) + "/network" + self.paramdict["binary_test_data_dir"]
         testmode = self.paramdict["testmode"]
         dataset = self.paramdict["dataset"]
         session = self.paramdict["session"]
@@ -464,27 +537,31 @@ class NetworkHandler:
         write_to_log("Started testing binary nets")  
         mon_threads = []
         net_threads = []
-        predictions = []
+        predictions = [None] * len(nets)
         built_ins = ["cifar10","cifar100","mnist"]
-
-        if not any(x in dataset for x in built_ins):
-            X_test, y_test, classes = loadimg.getimagedataandlabels(binary_test_data_dir,
-                                                                    nets[0].paramdict['imagedims'][0],
-                                                                    nets[0].paramdict['imagedims'][1],
-                                                                    verbose=True,
-                                                                    mode=testmode)
-        if verbose_level == 1:
-            print("************ Test data loading completed ************")
+        true_test_classes, class_labels = self.make_binary_test_generator(binary_test_data_dir)
         for net in nets:
+            if verbose_level == 1:
+                print(net.classname)
             net.load_model_weights(os.path.dirname(os.path.abspath(__file__))
                                       + "/network/model/" + dataset + "/" + session
                                       + "/" + net.classname + "/model_weights.hdf5")
             net.model._make_predict_function() # Initialize before threading
-            if not any(x in dataset for x in built_ins):
-                net.set_test_data(X_test)
-                net.set_classes(classes)
+            net.setup_binary_test(self.test_data_generator)
+            returned = net.test("binary_testdatagen")
+            predictions[class_labels.index(net.classname)] = returned
         if verbose_level == 1:
-            print("************ All weights loaded ************")
+            print(class_labels)
+        if verbose_level == 1:
+            print("************ Accuracy predictions completed ************")
+        if not any(x in dataset for x in built_ins):
+            fps_X_test, fps_y_test, classes = loadimg.getimagedataandlabels(binary_test_data_dir,
+                                                                            self.paramdict['imagedims'][0],
+                                                                            self.paramdict['imagedims'][1],
+                                                                            verbose=True,
+                                                                            mode=testmode)
+        if verbose_level == 1:
+            print("************ All FPS test data loaded ************")
         for monitor in monitors:
             thr = threading.Thread(target=monitor.start_monitoring, args=(self.paramdict, phase, self.paramdict["session"]))
             thr.deamon = True
@@ -497,26 +574,33 @@ class NetworkHandler:
         elapsed_times = []
         fps_arr = []
         for i in range (num_tests):
-            print("******** Predictions test: ", str(i+1),"*********")            
+            print("******** FPS predictions test: ", str(i+1),"*********")            
             pool = ThreadPool(processes=len(nets))
             results = []
             start_time = int(round(time.time() * 1000))
             for net in nets:
-                results.append(pool.apply_async(net.test, (testmode,)))
+                results.append(pool.apply_async(net.model.predict, (fps_X_test,)))
             pool.close()
             pool.join()
-            predictions = [r.get() for r in results]
+            fps_predictions = [r.get() for r in results]
             end_time = int(round(time.time() * 1000))
             times.append((start_time,end_time))
             time_elapsed = end_time - start_time
             elapsed_times.append(time_elapsed)
-            fps = len(net.X_test)/(time_elapsed/1000)
+            fps = len(fps_X_test)/(time_elapsed/1000)
             fps_arr.append(fps)
         for t in mon_threads:
             t.do_run = False
         if verbose_level == 1:
             print("************ All predictions completed! Scoring test ************")
-        report,report_dict = self.score_test(classes, predictions, y_test, output_weights, times, elapsed_times, fps_arr, threshold)
+        report,report_dict = self.score_test(class_labels,
+                                             predictions,
+                                             true_test_classes,
+                                             output_weights,
+                                             times,
+                                             elapsed_times,
+                                             fps_arr,
+                                             threshold)
         if verbose_level == 1:
             print("************ Test scored, saving reports ************")
         self.save_report(report, "report_"+phase+".txt")
@@ -539,14 +623,12 @@ class NetworkHandler:
         mcc = np.zeros(classlen)
         total_per_class = np.zeros(classlen)
         predicted = self.make_final_predictions(classes, test_predictions, output_weights, threshold)
-        y_test_conv = []
         total_correct = 0
         conf_mat = np.zeros((classlen,classlen))
         for i in range(len(predicted)):
-            y_test_conv.append(classes.index(y_test[i]))
             correct_output = False
             incorrect_output = False
-            true_class = classes.index(y_test[i])
+            true_class = y_test[i]
             for j in range(classlen):
                 if j == true_class:
                     if predicted[i,j]:
@@ -649,6 +731,15 @@ class NetworkHandler:
                      + ", Avg FPS: " + str(np.mean(fps_arr)))
         return report, report_dict
 
+    def sklearn_score(self, test_predictions, true_classes, class_labels):
+        predicted_classes = np.argmax(test_predictions,axis=1)    
+        acc = metrics.accuracy_score(true_classes, predicted_classes)
+        conf_mat = metrics.confusion_matrix(true_classes, predicted_classes)
+        mcc = metrics.matthews_corrcoef(true_classes, predicted_classes)
+        report = metrics.classification_report(true_classes, predicted_classes, target_names=class_labels)
+        report = report + "\nAccuracy: " + str(acc) + "\nMCC: " + str(mcc) + "\nConfusion matrix: \n" + str(conf_mat)
+        return report
+
     def make_final_predictions(self, classes, test_predictions, output_weights, threshold = False):
         verbose_level = self.paramdict["verbose_level"]
         network_type = self.paramdict["network_type"]
@@ -659,6 +750,8 @@ class NetworkHandler:
             binary_multiple = False
         if verbose_level == 1:
             print("Making final predictions")
+        if verbose_level == 1:
+            print("Classes:", classes)
         if network_type == "multiclass":
             predicted = np.multiply(test_predictions, np.asarray(output_weights))
             if not threshold:
@@ -669,13 +762,15 @@ class NetworkHandler:
             else:
                 predicted = predicted > threshold
         elif network_type == "binary" and binary_test:
-            print(len(test_predictions))
-            print(test_predictions[0])
-            predicted = np.zeros((len(test_predictions[0][1]), len(output_weights)))
+            pred_classes = [item[0] for item in test_predictions]
+            if verbose_level == 1:
+                print("Predicted classes :", pred_classes)
+            predicted = np.zeros((len(test_predictions[0][1]), len(classes)))
             for predictions in test_predictions:
                 if verbose_level == 1:
                     print("Predictions for class: " + predictions[0])
-                index = classes.index(predictions[0])
+                net_classname = predictions[0]
+                index = sorted(classes).index(net_classname)
                 for i in range(len(predictions[1])):
                     predicted[i][index] = predictions[1][i][1]
             predicted = np.multiply(predicted, np.asarray(output_weights))
@@ -687,6 +782,8 @@ class NetworkHandler:
             else:
                 predicted = predicted > threshold
         elif not binary_test:
+            output_weights = [1,1]
+            predicted = np.multiply(test_predictions, np.asarray(output_weights))
             if not threshold:
                 predicted_ind = np.argmax(predicted, axis=1)
                 predicted = np.zeros(predicted.shape,dtype=bool)
