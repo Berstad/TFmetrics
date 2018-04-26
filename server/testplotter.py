@@ -16,6 +16,7 @@ matplotlib.use('Agg')
 # This allows matplotlib to run without an X backend,
 # not sure if displaying the plots will work like this
 import matplotlib.pyplot as plt
+import scikitplot.metrics as pltmetrics
 import os
 import json
 import datetime
@@ -24,7 +25,8 @@ import datetime
 # Plots my metric json files using pyplot
 # TODO: Write more comments here and make it not so awful, perhaps fix the way metrics are stored so that it makes more
 # sense with how Keras stores history. Also split into smaller functions
-def plot_json(combine, figname, filepath, verbose, gpu_specsdir, sys_specsdir, paramdictdir, library, save=True, show = True, sessionid="testing"):
+def plot_json(combine, figname, filepath, verbose, gpu_specsdir, sys_specsdir, paramdictdir, library,
+              save=True, show=True, sessionid="testing"):
     with open(filepath) as json_data:
         metrics = json.load(json_data)
     with open(os.path.dirname(os.path.abspath(__file__)) + "/metrics/dicts/units.json") as json_data:
@@ -35,6 +37,24 @@ def plot_json(combine, figname, filepath, verbose, gpu_specsdir, sys_specsdir, p
         sys_specs = json.load(json_data)
     with open(paramdictdir) as json_data:
         paramdict = json.load(json_data)
+
+    # Get epoch or test times to add to plots
+    filename = filepath.split("/")[-1]
+    epochs = {}
+    test_times = {}
+    sessiondir = filepath.replace(filename,"")
+    sessiondir = sessiondir.replace("/kerasmon","")
+    sessiondir = sessiondir.replace("/nvmon","")
+    sessiondir = sessiondir.replace("/psmon","")
+    sessiondir = sessiondir.replace("/tpmon","")
+    if "calibration" not in filename:
+        if "test" in filename:
+            with open(sessiondir + "/kerasmon/report_" + filename) as json_data:
+                test_times = json.load(json_data)
+        elif "train" in filename or "fine_tune" in filename:
+            with open(sessiondir + "/kerasmon/times_" + filename) as json_data:
+                epochs = json.load(json_data)
+
     begin = metrics["0"]["0"]["time"]
     final = str(len(list(metrics[list(metrics.keys())[-1]].keys()))-5)
     if verbose:
@@ -70,14 +90,10 @@ def plot_json(combine, figname, filepath, verbose, gpu_specsdir, sys_specsdir, p
                         mets[met_index].append(np.mean(metrics[str(i)][str(j)][metric]))
                     else:
                         mets[met_index].append(metrics[str(i)][str(j)][metric])
-        met_avg = np.mean(mets[met_index])
+        
         if len(mets[met_index])%2 != 0:
             mets[met_index].append(mets[met_index][-1])
-        polling_rate = paramdict[translate_mets(library)]["polling_rate"]    
-        # polling_rate = (time_elapsed/1000)/len(mets[met_index])
-        # polling_rate = round(polling_rate,1)
-        # if polling_rate > 1:
-        #     polling_rate = round(polling_rate)
+        polling_rate = paramdict[translate_mets(library)]["polling_rate"]
         if verbose:
             print("Polling rate: ", polling_rate,"s")
             print("Metric array length: ", len(mets[met_index]))
@@ -87,8 +103,22 @@ def plot_json(combine, figname, filepath, verbose, gpu_specsdir, sys_specsdir, p
         if combine:
             plt.subplot(3,4,met_index+1)
 
-            # Put together the actual plot
-        plt.plot(x,mets[met_index],'-')
+        unit = units[metric]
+        if "disk_io" in metric:
+            unit = "MB"
+            mets[met_index] = np.array(mets[met_index])
+            mets[met_index] = mets[met_index]/1e6
+        elif "B" in unit:
+            unit = "GB"
+            mets[met_index] = np.array(mets[met_index])
+            mets[met_index] = mets[met_index]/1e9
+        elif "mW" in unit:
+            unit = "W"
+            mets[met_index] = np.array(mets[met_index])
+            mets[met_index] = mets[met_index]/1e3
+        met_avg = np.mean(mets[met_index])
+        # Put together the actual plot
+        plt.plot(x, mets[met_index], '-')
 
         if len(mets[met_index]) > 1:
             # Extremely hacky way to make a moving average, ugly and should be replaced
@@ -105,14 +135,90 @@ def plot_json(combine, figname, filepath, verbose, gpu_specsdir, sys_specsdir, p
             #print(diff)
             mov_avg = np.pad(mov_avg,(diff//2,back),'constant',constant_values=(np.nan))
             plt.plot(x,mov_avg,'-')
-
-
-        plt.xlabel("Seconds, Avg = " + str(float("{0:.2f}".format(met_avg))) + units[metric])
-        plt.ylabel(units[metric])
-        plt.title(metric)
+        lims = plt.gca().get_ylim()
+        shift = (lims[1] - lims[0])/100
+        plt.gca().ticklabel_format(style='plain', axis='y')
+        if test_times:
+            jmp = False
+            curr = 0
+            if "binary" not in filename:
+                if len(test_times["test"]["times"]) > 10:
+                    jmp = len(lest_times["test"]["times"])//4
+                t_zero = test_times["test"]["times"][0][0]
+                for i in range(len(test_times["test"]["times"])):
+                    if jmp and i != curr and i != 0:
+                        continue
+                    elif jmp:
+                        curr = curr + jmp
+                    t_start = (test_times["test"]["times"][i][0] - t_zero)/1000
+                    t_end = (test_times["test"]["times"][i][1] - t_zero)/1000
+                    plt.axvline(t_start, color="k",ls = "--", lw = 1)
+                    plt.text(t_start, lims[1] + shift, str(i+1))
+                    plt.axvline(t_end, color="k", ls = "--", lw = 1)
+            else:
+                if len(test_times["times"]) > 10:
+                    jmp = len(lest_times["times"])//4
+                t_zero = test_times["times"][0][0]
+                for i in range(len(test_times["times"])):
+                    if jmp and i != curr and i != 0:
+                        continue
+                    elif jmp:
+                        curr = curr + jmp
+                    t_start = (test_times["times"][i][0] - t_zero)/1000
+                    t_end = (test_times["times"][i][1] - t_zero)/1000
+                    plt.axvline(t_start, color="k",ls = "--", lw = 1)
+                    plt.text(t_start, lims[1] + shift, str(i+1))
+                    plt.axvline(t_end, color="k",ls = "--", lw = 1)
+        if epochs:
+            jmp = False
+            curr = 0
+            t_zero = epochs[0]["start"]
+            if len(epochs) > 10:
+                    jmp = len(epochs)//4
+            for i in range(len(epochs)):
+                if jmp and i != curr and i != 0:
+                    continue
+                elif jmp:
+                    curr = curr + jmp
+                t_start = (epochs[i]["start"] - t_zero)/1000
+                t_end = (epochs[i]["end"] - t_zero)/1000
+                plt.axvline(t_start, color="k",ls = "--", lw = 1)
+                plt.text(t_start, lims[1] + shift, str(i+1))
+                plt.axvline(t_end, color="k",ls = "--", lw = 1)
+        plt.xlabel("Seconds, Avg = " + str(float("{0:.2f}".format(met_avg))) + unit)
+        plt.ylabel(unit)
+        plt.title(metric,y=1.08)
         met_index += 1
         if not combine:
-            save_show(plt,library,sessionid,metric,show,save)
+            plt.tight_layout()
+            save_show(plt,library,sessionid,metric,show,save,filename)
+            if test_times:
+                if "binary" not in filename:
+                    plt.title(metric + ", First test",y=1.08)
+                    t_zero = test_times["test"]["times"][0][0]
+                    plt.gca().set_xlim(0,((test_times["test"]["times"][0][1]-t_zero)/1000) + 2)
+                    save_show(plt,library,sessionid,metric+"_first_test",show,save,filename)
+                    plt.title(metric + ", Final test",y=1.08)
+                    plt.gca().set_xlim(((test_times["test"]["times"][-1][0]-t_zero)/1000) - 2,((test_times["test"]["times"][-1][1]-t_zero)/1000))
+                    save_show(plt,library,sessionid,metric+"_final_test",show,save,filename, True)
+                else:
+                    plt.title(metric + ", First test",y=1.08)
+                    t_zero = test_times["times"][0][0]
+                    plt.gca().set_xlim(0,((test_times["times"][0][1]-t_zero)/1000) + 2)
+                    save_show(plt,library,sessionid,metric+"_first_test",show,save,filename)
+                    plt.title(metric + ", Final test",y=1.08)
+                    plt.gca().set_xlim(((test_times["times"][-1][0]-t_zero)/1000) - 2,((test_times["times"][-1][1]-t_zero)/1000))
+                    save_show(plt,library,sessionid,metric+"_final_test",show,save,filename, True)
+            elif epochs:
+                plt.title(metric + ", First epoch",y=1.08)
+                t_zero = epochs[0]["start"]
+                plt.gca().set_xlim(0,((epochs[0]["end"]-t_zero)/1000) + 2)
+                save_show(plt,library,sessionid,metric+"_first_epoch",show,save,filename)
+                plt.title(metric + ", Final epoch",y=1.08)
+                plt.gca().set_xlim(((epochs[-1]["start"]-t_zero)/1000) - 2,((epochs[-1]["end"]-t_zero)/1000))
+                save_show(plt,library,sessionid,metric+"_final_epoch",show,save,filename, True)
+            else:
+                plt.close()
     if combine:
         title = figname + ": " + filepath + "\n" \
                 + "Time elapsed: " + str(datetime.timedelta(milliseconds=time_elapsed)) + "s" + "\n"
@@ -124,7 +230,7 @@ def plot_json(combine, figname, filepath, verbose, gpu_specsdir, sys_specsdir, p
 
         plt.suptitle(title)
         plt.tight_layout(rect=[0, 0.03, 1, 0.90])
-        save_show(plt,library,sessionid,figname,show,save)
+        save_show(plt,library,sessionid,figname,show,save,True)
 
 # TODO: Do this in a very different way.
 def translate_mets(met_param):
@@ -133,6 +239,7 @@ def translate_mets(met_param):
         "psmon": "psmet",
         "tpmon": "tpmet",
     }[met_param]
+
 
 # Plot history objects and in the future other callback objects from Keras
 def plot_history(combine, figname, filepath, verbose, library, save=True, show=True, sessionid="testing"):
@@ -169,29 +276,103 @@ def plot_history(combine, figname, filepath, verbose, library, save=True, show=T
         plt.title(metric)
         met_index += 1
         if not combine:
-            save_show(plt,library,sessionid,metric,show,save)
+            filename = filepath.split("/")[-1]
+            save_show(plt,library,sessionid,metric,show,save,filename,True)
     if combine:
         title = figname + ": " + filepath + "\n" \
                 + "Number of Epochs: "+ str(num_epochs) + "\n" \
 
         plt.suptitle(title)
         plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-        save_show(plt,library,sessionid,figname,show,save)
+        save_show(plt,library,sessionid,figname,show,save,True)
 
 
-def save_show(plt, libary, sessionid, figname, show = True, save = False):
-    dir = os.path.dirname(os.path.abspath(__file__)) + "/metrics/storage/sessions/"\
-                         + sessionid + "/" + libary + "/figures/"
+def save_show(plt, library, sessionid, figname, show=True,
+              save=False, filename = False, close = False,
+              analysis = False):
+    if not analysis:
+        dir = os.path.dirname(os.path.abspath(__file__)) + "/metrics/storage/sessions/" \
+              + sessionid + "/" + library + "/figures/"
+    else:
+        dir = library + "/figures/"
     fign = figname.replace(".json","")
-    fign = fign.lower().replace(" ", "_") + '.png'
-    path = dir + fign
+    fign = fign.lower().replace(" ", "_") + '.pdf'
+    if filename:
+        subdir = filename.replace(".json","")
+        path = dir + subdir + "/"
+        os.makedirs(path, exist_ok=True)
+        path = path + fign
+    else:
+        os.makedirs(dir, exist_ok=True)
+        path = dir + fign
     fig1 = plt.gcf()
     if show:
         plt.show()
     plt.draw()
     if save:
-        fig1.savefig(path)
-    plt.close()
+        fig1.savefig(path, dpi=500)
+    if close:
+        plt.close()
+
+
+def plot_analysis(combine, test_name, y_true, y_pred, y_proba,
+                  labels, verbose, library, save=True,
+                  show=True, sessionid="testing", prefix = ""):
+
+    met_index = 0
+
+    # TODO: Find a way to do this better
+    pltmetrics.plot_confusion_matrix(y_true, y_pred)
+    if not combine:
+        save_show(plt, library + "/" + prefix, sessionid, "confusion_matrix", show, save, False, True, True)
+    else:
+        plt.subplot(2,4,met_index+1)
+    met_index += 1
+
+    pltmetrics.plot_roc_curve(y_true, y_proba)
+    if not combine:
+        save_show(plt, library + "/" + prefix, sessionid, "roc_curves", show, save, False, True, True)
+    else:
+        plt.subplot(2,4,met_index+1)
+    met_index += 1
+
+    if len(labels) < 3:
+        pltmetrics.plot_ks_statistic(y_true, y_proba)
+        if not combine:
+            save_show(plt, library + "/" + prefix, sessionid, "ks_statistics", show, save, False, True, True)
+        else:
+            plt.subplot(2,4,met_index+1)
+        met_index += 1
+
+    pltmetrics.plot_precision_recall_curve(y_true, y_proba)
+    if not combine:
+        save_show(plt, library + "/" + prefix, sessionid, "precision_recall_curve", show, save, False, True, True)
+    else:
+        plt.subplot(2,4,met_index+1)
+    met_index += 1
+
+    if len(labels) < 3:
+        pltmetrics.plot_cumulative_gain(y_true, y_proba)
+        if not combine:
+            save_show(plt, library + "/" + prefix, sessionid, "cumulative_gain", show, save, False, True, True)
+        else:
+            plt.subplot(2,4,met_index+1)
+        met_index += 1
+
+    if len(labels) < 3:
+        pltmetrics.plot_lift_curve(y_true, y_proba)
+        if not combine:
+            save_show(plt, library + "/" + prefix, sessionid, "lift_curve", show, save, False, True, True)
+        else:
+            plt.subplot(2,4,met_index+1)
+        met_index += 1
+
+    if combine:
+        plt.suptitle(test_name)
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+        save_show(plt,library,sessionid,figname,show,save,True, analysis = True)
+ 
+ 
 
 if __name__ == '__main__':
     pass

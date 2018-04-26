@@ -309,20 +309,26 @@ class NetworkHandler:
             verbose = True
         else:
             verbose = False
+        combine = False
+        if "combine" in self.paramdict:
+            combine = self.paramdict["combine"]
         for metric in metrics:
             for root, dirs, files in os.walk(rootdir + "/" + metric):
                 for filename in files:
                     if verbose_level == 1:
                         print(metric,"/",filename)
-                    if "hist" in filename and "png" not in filename:
-                        testplotter.plot_history(True, filename,
+                    if "hist" in filename and "png" not in filename and "pdf" not in filename:
+                        testplotter.plot_history(combine, filename,
                                                  rootdir + "/" + metric + "/" + filename,
                                                  False, metric, save_figures, show_figures, session)
-                    elif "report" not in filename and "specs" not in filename and "predictions" not in filename and "png" not in filename and "times" not in filename:
-                        testplotter.plot_json(True, filename,
+                    elif "report" not in filename and "specs" not in filename and "predictions" not in filename and "png" not in filename and "times" not in filename and "pdf" not in filename:
+                        testplotter.plot_json(combine, filename,
                                               rootdir + "/" + metric + "/" + filename,
                                               False, gpu_specsdir, sys_specsdir, paramdictdir,
                                               metric, save_figures, show_figures, session)
+                    elif "predictions" in filename:
+                        self.make_analysis(combine, filename, rootdir + "/" + metric + "/",
+                                           verbose, metric, save_figures, show_figures, session)
 
     def calibrate(self, net, cal_phase, monitors):
         verbose_level = self.paramdict["verbose_level"]
@@ -771,10 +777,12 @@ class NetworkHandler:
         report = report + "\nAccuracy: " + str(acc) + "\nMCC: " + str(mcc) + "\nConfusion matrix: \n" + str(conf_mat)
         return report
 
-    def make_final_predictions(self, classes, test_predictions, output_weights, threshold = False):
+    def make_final_predictions(self, classes, test_predictions, output_weights, threshold = False, analysis = False):
         verbose_level = self.paramdict["verbose_level"]
         network_type = self.paramdict["network_type"]
         binary_test = self.paramdict["binary_test"]
+        predicted_ind = []
+        binary_proba = []
         if "binary_multiple" in self.paramdict:
             binary_multiple = self.paramdict["binary_multiple"]
         else:
@@ -792,7 +800,7 @@ class NetworkHandler:
                     predicted[i,predicted_ind[i]] = True
             else:
                 predicted = predicted > threshold
-        elif network_type == "binary" and binary_test:
+        elif network_type == "binary" and binary_test or analysis:
             pred_classes = [item[0] for item in test_predictions]
             if verbose_level == 1:
                 print("Predicted classes :", pred_classes)
@@ -805,6 +813,7 @@ class NetworkHandler:
                 for i in range(len(predictions[1])):
                     predicted[i][index] = predictions[1][i][1]
             predicted = np.multiply(predicted, np.asarray(output_weights))
+            binary_proba = np.copy(predicted)
             if not threshold:
                 predicted_ind = np.argmax(predicted, axis=1)
                 predicted = np.zeros(predicted.shape,dtype=bool)
@@ -827,8 +836,11 @@ class NetworkHandler:
             predicted_ind = np.argmax(predicted, axis=1)
             predicted = np.zeros(predicted.shape,dtype=bool)
             for i in range(len(predicted_ind)):
-                predicted[i,predicted_ind[i]] = True        
-        return predicted
+                predicted[i,predicted_ind[i]] = True
+        if analysis:
+            return predicted, predicted_ind, binary_proba
+        else:
+            return predicted
 
     '''Non-keras method written by Konstantin: Used for test'''
     def misc_measures(self, tp, tn, fp, fn):
@@ -849,6 +861,32 @@ class NetworkHandler:
             pre_dict["classname"] = classname
             dir_string = dir_string + "_" + classname
         self.save_report_dict(pre_dict, dir_string + ".json")
+
+    def make_analysis(self, combine, filename, directory,
+                      verbose, metric, save_figures, show_figures, session):
+        pre_dict = open_json(directory, filename)
+        class_labels = pre_dict["class_labels"]
+        true_class_labels = pre_dict["true_class_labels"]
+        output_weights = self.paramdict["output_class_weights"]
+        predictions = pre_dict["predictions"]
+        prefix = filename.replace(".json","") + "/"
+        predicted, predicted_ind, binary_proba = self.make_final_predictions(class_labels,
+                                                                             predictions,
+                                                                             output_weights,
+                                                                             analysis = True)
+        # Remove the final slash
+        directory = directory[:-1]
+        if len(predicted_ind) > 0:
+            if len(binary_proba) > 0:
+                testplotter.plot_analysis(combine, filename, true_class_labels,
+                                          predicted_ind, binary_proba,
+                                          sorted(class_labels), verbose, directory, save_figures,
+                                          show_figures, session, prefix)
+            else:
+                testplotter.plot_analysis(combine, filename, true_class_labels,
+                                          predicted_ind, predictions,
+                                          sorted(class_labels), verbose, directory, save_figures,
+                                          show_figures, session, prefix)
 
 def ensure_session_storage(session):
     directory = os.path.dirname(os.path.abspath(__file__)) + '/metrics/storage/sessions/' \
@@ -910,14 +948,15 @@ if __name__ == '__main__':
                         # Run the network and monitor performance
                         handler.run_with_monitors(monlist)
                         handler.save_session_params(paramdict, session, "params.json")
-                        handler.plot_results(rootdir)
                         handler = None
                     if paramdict["binary_test"]:
                         print("Running binary test")
                         handler = NetworkHandler(paramdict)
                         handler.run_with_monitors(monlist)
-                        handler.plot_results(rootdir)
                         handler = None
+                    if paramdict["save_figures"] or paramdict["show_figures"]:
+                        handler = NetworkHandler(paramdict)
+                        handler.plot_results(rootdir)
                     os.rename(paramdir + file, paramdir + "completed/" + file)
                     print("Successfully processed ", file)
                     write_to_log("Successfully processed " + str(file))
