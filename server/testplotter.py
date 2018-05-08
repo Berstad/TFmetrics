@@ -54,7 +54,7 @@ def plot_json(combine, figname, filepath, verbose, gpu_specsdir, sys_specsdir, p
         sys_specs = json.load(json_data)
     with open(paramdictdir) as json_data:
         paramdict = json.load(json_data)
-
+    plt.rcParams.update({'font.size': 18})
     # Get epoch or test times to add to plots
     filename = filepath.split("/")[-1]
     epochs = {}
@@ -214,6 +214,7 @@ def plot_json(combine, figname, filepath, verbose, gpu_specsdir, sys_specsdir, p
         met_index += 1
         if not combine:
             plt.tight_layout()
+            #plt.gcf().set_size_inches(2.45,2.45)
             save_show(plt,library,sessionid,metric,show,save,filename, include_title=False)
             if test_times:
                 if "binary" not in filename:
@@ -266,6 +267,7 @@ def translate_mets(met_param):
 
 # Plot history objects and in the future other callback objects from Keras
 def plot_history(combine, figname, filepath, verbose, library, save=True, show=True, sessionid="testing"):
+    plt.rcParams.update({'font.size': 14})
     with open(filepath) as json_data:
         metrics = json.load(json_data)
     with open(os.path.dirname(os.path.abspath(__file__)) + "/metrics/dicts/units.json") as json_data:
@@ -273,7 +275,7 @@ def plot_history(combine, figname, filepath, verbose, library, save=True, show=T
     met_index = 0
     num_epochs = 0
     if combine:
-        fig = plt.figure(1,figsize=(20, 16), dpi=80)
+        fig = plt.figure(1,figsize=(20, 16), dpi=300)
     for metric in metrics.keys():
         if verbose:
             print("Current metric: ",metric)
@@ -300,6 +302,7 @@ def plot_history(combine, figname, filepath, verbose, library, save=True, show=T
         met_index += 1
         if not combine:
             filename = filepath.split("/")[-1]
+            #plt.gcf().set_size_inches(3.65,3.65)
             save_show(plt,library,sessionid,metric,show,save,filename,True, include_title=False)
     if combine:
         title = figname + ": " + filepath + "\n" \
@@ -346,17 +349,25 @@ def plot_analysis(combine, test_name, y_true, y_pred, y_proba,
                   show=True, sessionid="testing", prefix = ""):
 
     met_index = 0
-
+    plt.rcParams.update({'font.size': 14})
     # TODO: Find a way to do this better
     pltmetrics.plot_confusion_matrix(y_true, y_pred)
     if not combine:
+        #plt.gcf().set_size_inches(3.65,3.65)
         save_show(plt, library + "/" + prefix, sessionid, "confusion_matrix", show, save, False, True, True, False)
     else:
         plt.subplot(2,4,met_index+1)
     met_index += 1
 
+    plt.rcParams.update({'font.size': 12})
     pltmetrics.plot_roc_curve(y_true, y_proba)
+    for text in plt.gca().legend_.get_texts():
+        text.set_text(text.get_text().replace("ROC curve of class","class"))
+        text.set_text(text.get_text().replace("area =","AUC: "))
+        text.set_text(text.get_text().replace("micro-average ROC curve","micro-avg"))
+        text.set_text(text.get_text().replace("macro-average ROC curve","macro-avg"))
     if not combine:
+        #plt.gcf().set_size_inches(3.65,3.65)
         save_show(plt, library + "/" + prefix, sessionid, "roc_curves", show, save, False, True, True, False)
     else:
         plt.subplot(2,4,met_index+1)
@@ -365,13 +376,20 @@ def plot_analysis(combine, test_name, y_true, y_pred, y_proba,
     if len(labels) < 3:
         pltmetrics.plot_ks_statistic(y_true, y_proba)
         if not combine:
+            #plt.gcf().set_size_inches(3.65,3.65)
             save_show(plt, library + "/" + prefix, sessionid, "ks_statistics", show, save, False, True, True, False)
         else:
             plt.subplot(2,4,met_index+1)
         met_index += 1
 
     pltmetrics.plot_precision_recall_curve(y_true, y_proba)
+    for text in plt.gca().legend_.get_texts():
+        text.set_text(text.get_text().replace("Precision-recall curve of class","class"))
+        text.set_text(text.get_text().replace("area =","AUC: "))
+        text.set_text(text.get_text().replace("micro-average Precision-recall curve","micro-avg"))
+        text.set_text(text.get_text().replace("macro-average Precision-recall","macro-avg"))
     if not combine:
+        #plt.gcf().set_size_inches(3.65,3.65)
         save_show(plt, library + "/" + prefix, sessionid, "precision_recall_curve", show, save, False, True, True, False)
     else:
         plt.subplot(2,4,met_index+1)
@@ -380,6 +398,7 @@ def plot_analysis(combine, test_name, y_true, y_pred, y_proba,
     if len(labels) < 3:
         pltmetrics.plot_cumulative_gain(y_true, y_proba)
         if not combine:
+            #plt.gcf().set_size_inches(3.65,3.65)
             save_show(plt, library + "/" + prefix, sessionid, "cumulative_gain", show, save, False, True, True, False)
         else:
             plt.subplot(2,4,met_index+1)
@@ -388,6 +407,7 @@ def plot_analysis(combine, test_name, y_true, y_pred, y_proba,
     if len(labels) < 3:
         pltmetrics.plot_lift_curve(y_true, y_proba)
         if not combine:
+            #plt.gcf().set_size_inches(3.65,3.65)
             save_show(plt, library + "/" + prefix, sessionid, "lift_curve", show, save, False, True, True, False)
         else:
             plt.subplot(2,4,met_index+1)
