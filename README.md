@@ -11,6 +11,6 @@ github.com/Berstad/image-direct-load-keras (A forked repository which enables yo
 To install:
 - Navigate to the folder you want to install the program in.
 - Run 'git clone https://www.github.com/Berstad/TFMetrics'
-- Run 'git submodule update --recursibe --remote'
+- Run 'git submodule update --init --recursive --remote'
 - Navigate to the server/packages/customkeras folder
 - Run 'python3 setup.py install'
