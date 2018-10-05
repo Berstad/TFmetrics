@@ -92,6 +92,7 @@ class NetworkHandler:
         train = self.paramdict["train"]
         fine_tune = self.paramdict["fine_tune"]
         test = self.paramdict["test"]
+        save_as_uff = self.paramdict["save_model_as_uff"]
         binary_test = self.paramdict["binary_test"]
         verbose_level = self.paramdict["verbose_level"]
         if "num_tests" in self.paramdict:
@@ -257,6 +258,36 @@ class NetworkHandler:
                         write_to_log("Number of layers: " + str(num_layers))
                         self.calibrate(net, "test", monitors)
                         self.test_net(net, monitors, net.paramdict["output_class_weights"],num_tests=num_tests)
+                    del net
+                    print("Deleted net to free memory")
+                    write_to_log("Deleted net to free memory")
+            if save_as_uff:
+                if self.paramdict["network_type"] == "binary":
+                    classes = self.get_classes_from_folder("/network" + self.paramdict["train_data_dir"])
+                    print(classes)
+                    for cls in classes:
+                        net,time_callback = self.setup_network(cls)
+                        num_layers = len(net.model.layers)
+                        if net.setup_completed:
+                            print("Setup completed")
+                            write_to_log("Setup completed")
+                            print("Number of layers: ", num_layers)
+                            write_to_log("Number of layers: " + str(num_layers))
+                            net.save_as_uff()
+                        net.clear_session()
+                        del net
+                        print("Deleted net to free memory")
+                        write_to_log("Deleted net to free memory")
+                else:
+                    net,time_callback = self.setup_network()
+                    num_layers = len(net.model.layers)
+                    if net.setup_completed:
+                        print("Setup completed")
+                        write_to_log("Setup completed")
+                        print("Number of layers: ", num_layers)
+                        write_to_log("Number of layers: " + str(num_layers))
+                        self.calibrate(net, "test", monitors)
+                        net.save_as_uff()
                     del net
                     print("Deleted net to free memory")
                     write_to_log("Deleted net to free memory")
@@ -957,6 +988,9 @@ if __name__ == '__main__':
                     if paramdict["save_figures"] or paramdict["show_figures"]:
                         handler = NetworkHandler(paramdict)
                         handler.plot_results(rootdir)
+                    if paramdict["save_model_as_uff"]:
+                        handler = NetworkHandler(paramdict)
+                        handler.run_with_monitors(monlist)
                     os.rename(paramdir + file, paramdir + "completed/" + file)
                     print("Successfully processed ", file)
                     write_to_log("Successfully processed " + str(file))

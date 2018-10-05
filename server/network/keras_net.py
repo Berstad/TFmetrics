@@ -35,6 +35,7 @@ import importlib
 import json
 from keras.utils.vis_utils import plot_model
 from keras.utils.generic_utils import CustomObjectScope
+import uff
 
 
 # From https://stackoverflow.com/questions/43178668/record-the-computation-time-for-each-epoch-in-keras-during-model-fit
@@ -237,6 +238,13 @@ class KerasNet:
         self.model.load_weights(path)
         if self.verbose:
             print("Model weights loaded!")
+        if "model_precision" in self.paramdict:
+            if self.paramdict["model_precision"] == "full":
+                pass
+            elif self.paramdict["model_precision"] == "half":
+                pass
+            elif self.paramdict["model_precision"] == "int8":
+                pass
 
     # Should clear the session and free memory
     def clear_session(self):
@@ -439,6 +447,18 @@ class KerasNet:
 
     def setup_binary_test(self, test_data_generator):
         self.test_data_generator = test_data_generator
+
+    def save_as_uff(self):
+        graph = K.get_session().graph
+        sess = K.get_session()
+        model_output = self.model.output.name.strip(':0')
+        frozen_graph = tf.graph_util.convert_variables_to_constants(sess, graph, [model_output])
+        frozen_graph = tf.graph_util.remove_training_nodes(frozen_graph)
+        uff_model = uff.from_tensorflow(frozen_graph, [model_output])
+        outpath = self.model_dir
+        with open(outpath, 'wb') as dump:
+            dump.write(uff_model)
+
 
 def save_json(obj, path,name):
     os.makedirs(path, exist_ok=True)

@@ -303,6 +303,7 @@ def plot_history(combine, figname, filepath, verbose, library, save=True, show=T
         if not combine:
             filename = filepath.split("/")[-1]
             #plt.gcf().set_size_inches(3.65,3.65)
+            plt.tight_layout()
             save_show(plt,library,sessionid,metric,show,save,filename,True, include_title=False)
     if combine:
         title = figname + ": " + filepath + "\n" \
