@@ -40,7 +40,7 @@
   "patience" : 5,
   "nadam_beta_1" : 0.9,
   "nadam_beta_2" : 0.999,
-  "output_class_weights": [0.512, 4.167, 0.816, 0.687, 0.653, 2.294, 1.930, 2.164]
+  "output_class_weights": [0.512, 4.167, 0.816, 0.687, 0.653, 2.294, 1.930, 2.164],
   "nvmet":
   {
     "polling_rate":0.5,
