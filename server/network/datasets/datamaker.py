@@ -145,6 +145,8 @@ def make_links(subdirs,classes, args_d, outdir):
     for subdir in subdirs[1:]:
         patharr = subdir.split("/")
         cls = patharr[-1]
+        if subdir[0] != '/':
+            subdir = os.path.join(os.getcwd(), subdir)
         if verbose:
             print("Making symlinks for", subdir)
         file_list = os.listdir(subdir)
@@ -250,6 +252,8 @@ def make_all(args_d):
             outp = args_d["out"]
         else:
             outp = dataset
+        if outp[0] != '/':
+            outp = os.path.join(os.getcwd(), outp)
         print("Warning: This operation will create", folders, "new folders containing", tot_files, "new symlinks in",
               outp)
         if not args_d["yes"]:
