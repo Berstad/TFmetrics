@@ -58,9 +58,8 @@ def create_symlink(oldpath, newpath, env, verbose, dry):
 
 def get_class_dirs(dataset_dir):
     classes_from_directories = []  # to determine the classes from the root folder structure automatically
-    root_dir = os.path.dirname(os.path.abspath(__file__)) + dataset_dir
     su = []
-    for directory, subdirectories, files in os.walk(root_dir, onerror=walkerror):
+    for directory, subdirectories, files in os.walk(dataset_dir, onerror=walkerror):
         subdirectories.sort()
         su.append(directory)
         for subdirectory in subdirectories:
@@ -84,8 +83,7 @@ def make_class_folder(name, completedir, binary, verbose, subdir = ""):
             os.makedirs(completedir+subdir+"/"+name+"/"+"negative")
 
 
-def make_folders(args_d,classnames, outp):
-    completedir = os.path.dirname(os.path.abspath(__file__)) + outp
+def make_folders(args_d,classnames, completedir):
     verbose = args_d["verbose"]
     if os.path.exists(completedir):
         print("Warning: Folder already exists!")
@@ -140,11 +138,10 @@ def make_folders(args_d,classnames, outp):
                 make_class_folder(name,completedir,args_d["binary"], verbose, subdir="test")
 
 
-def make_links(subdirs,classes, args_d, outp):
+def make_links(subdirs,classes, args_d, outdir):
     verbose = args_d["verbose"]
     dry = args_d["dry"]
     name, env, version = osdetect()
-    outdir = os.path.dirname(os.path.abspath(__file__)) + outp
     for subdir in subdirs[1:]:
         patharr = subdir.split("/")
         cls = patharr[-1]
