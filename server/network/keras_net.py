@@ -75,7 +75,7 @@ class KerasNet:
     calls = []
     train_class_weights = None
 
-    def __init__(self,paramdict_in,calls=[],classname = ""):
+    def __init__(self,paramdict_in,calls=[],classname = "",load_model_only=False):
         #the base model
         if paramdict_in["verbose_level"] == 1:
             self.verbose = True
@@ -118,6 +118,8 @@ class KerasNet:
                 self.test_data_dir = os.path.dirname(os.path.abspath(__file__)) + self.paramdict["test_data_dir"]
                 self.model_dir = os.path.dirname(os.path.abspath(__file__)) \
                                  + self.paramdict["model_dir"] + sessionname + "/"
+            if load_model_only:
+                self.my_load_model(self.model_dir  + "model.hdf5")
             if self.verbose:
                 print("Initilialization complete")
             self.setup_completed = True
@@ -321,8 +323,8 @@ class KerasNet:
             print("Model selected!")
 
     def my_load_model(self, path):
-        with CustomObjectScope({'relu6': keras.applications.mobilenet.relu6,'DepthwiseConv2D': keras.applications.mobilenet.DepthwiseConv2D}):
-            self.model = load_model(path)
+        #with CustomObjectScope({'relu6': keras.applications.mobilenet.relu6,'DepthwiseConv2D': keras.applications.mobilenet.DepthwiseConv2D}):
+        self.model = load_model(path)
         if self.verbose:
             print("Model loaded!")
 
@@ -412,6 +414,7 @@ class KerasNet:
                                                                           class_mode='categorical')
             self.train_class_weights = self.get_class_weights(self.train_generator.classes)
             self.classes = list(self.train_generator.class_indices.keys())
+            self.class_indices = self.train_generator.class_indices
 
             self.validation_generator = self.validation_datagen.flow_from_directory(self.validation_data_dir,
                                                                                     shuffle=False,
@@ -556,8 +559,17 @@ class KerasNet:
         else:
             print("Invalid testmode!")
 
-    def setup_binary_test(self, test_data_generator):
-        self.test_data_generator = test_data_generator
+    def make_binary_test_generator(self,binary_test_data_dir):
+        self.test_datagen = ImageDataGenerator(rescale=1. / 255)
+        self.test_data_generator = self.test_datagen.flow_from_directory(binary_test_data_dir,
+                                                                         target_size=(self.paramdict['imagedims'][0],
+                                                                                      self.paramdict['imagedims'][1]),
+                                                                         batch_size=self.paramdict['batch_size'],
+                                                                         class_mode='categorical',
+                                                                         shuffle=False)
+        test_true_classes = self.test_data_generator.classes
+        class_labels = list(self.test_data_generator.class_indices.keys())
+        return test_true_classes, class_labels
 
     # Save the current model to UFF format. Very useful for TensorRT!
     def save_as_uff(self):
@@ -579,6 +591,11 @@ class KerasNet:
         with open(outpath, 'wb') as dump:
             dump.write(uff_model)
 
+    def init_threading(self):
+        self.model._make_predict_function() # Initialize before threading
+
+    def my_predict(self,X):
+        return model.predict(X)
 
 def save_json(obj, path,name):
     os.makedirs(path, exist_ok=True)

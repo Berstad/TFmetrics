@@ -28,8 +28,10 @@ import time
 import datetime
 from network.keras_net import KerasNet, TimeHistory
 import network.packages.images.loadimg as loadimg
+import network.packages.gradcam.gradcam as gradcam
 from multiprocessing.pool import ThreadPool
 from keras.preprocessing import image as kimage
+import keras.backend as K
 import argparse
 import traceback
 import sklearn.metrics as metrics
@@ -71,7 +73,7 @@ class NetworkHandler:
     def __init__(self,paramdict_in):
         self.paramdict = paramdict_in
 
-    def setup_network(self, cls = None,test = False, tensorrt = False):
+    def setup_network(self, cls = None,test = False, tensorrt = False, load_model_only = False):
         time_callback = None
         dataset = self.paramdict["dataset"]
         session = self.paramdict["session"]
@@ -81,7 +83,7 @@ class NetworkHandler:
         else:
             time_callback = TimeHistory()
             callbacks = [time_callback]
-            net = KerasNet(self.paramdict, callbacks, cls)
+            net = KerasNet(self.paramdict, callbacks, cls,load_model_only)
         metrics = ['accuracy'] #kermet.fmeasure, kermet.recall, kermet.precision,
                    #kermet.matthews_correlation, kermet.true_pos,
                    #kermet.true_neg, kermet.false_pos, kermet.false_neg, kermet.specificity]
@@ -89,10 +91,11 @@ class NetworkHandler:
         if net.setup_completed:
             print("Setup completed")
             write_to_log("Setup completed")
-            num_layers = len(net.model.layers)
+            if not tensorrt:
+                num_layers = len(net.model.layers)
+                print("Number of layers: ", num_layers)
+                write_to_log("Number of layers: " + str(num_layers))
             path = os.path.dirname(os.path.abspath(__file__)) + '/metrics/storage/sessions/' + self.paramdict["session"] + "/"
-            print("Number of layers: ", num_layers)
-            write_to_log("Number of layers: " + str(num_layers))
             if not test:
                 net.save_model_vis(path, "model_visualization_" + str(net.classname or '') + ".png")
                 print("Wrote model visualization to session folder " + self.paramdict["session"])
@@ -100,7 +103,7 @@ class NetworkHandler:
                 net.freeze_base_model()
             net.gen_data(save_preview=self.paramdict["save_preview"])
             net.compile_setup(metrics)
-            if test:
+            if test and not load_model_only:
                 if net.classname != "":
                     net.load_model_weights(os.path.dirname(os.path.abspath(__file__))
                                             + "/network/model/" + dataset + "/" + session
@@ -113,7 +116,7 @@ class NetworkHandler:
 
 
     def run_with_monitors(self, monitors=[]):
-        priority = ["setup","train","fine_tune","test","save_as_uff","run_video"]
+        priority = ["setup","train","fine_tune","save_as_uff","test","run_video"]
         binary_test = self.paramdict["binary_test"]
         verbose_level = self.paramdict["verbose_level"]
         if "tensorrt" in self.paramdict:
@@ -128,12 +131,16 @@ class NetworkHandler:
             binary_val_test = self.paramdict["binary_val_test"]
         else:
             binary_val_test = False
+        if "load_model_only" in self.paramdict:
+            load_model_only = paramdict["load_model_only"]
+        else:
+            load_model_only = False
         if binary_val_test:
             classes = self.get_classes_from_folder("/network" + self.paramdict["binary_test_data_dir"])
             print(classes)
             nets = []
             for cls in classes:
-                net,time_callback = self.setup_network(cls,test=True)
+                net,time_callback = self.setup_network(cls,test=True,load_model_only=load_model_only)
                 nets.append(net)
             self.test_binary_nets(nets, monitors, "parallell",
                                   self.paramdict["output_class_weights"],
@@ -146,7 +153,7 @@ class NetworkHandler:
             print(classes)
             nets = []
             for cls in classes:
-                net,time_callback = self.setup_network(cls,test=True)
+                net,time_callback = self.setup_network(cls,test=True,load_model_only=load_model_only)
                 nets.append(net)
             self.test_binary_nets(nets, monitors, "parallell",
                                   self.paramdict["output_class_weights"],
@@ -163,20 +170,20 @@ class NetworkHandler:
                         for clsname in classes:
                             self.process_net_action(clsname, action,
                                                     monitors, num_tests,
-                                                    tensorrt)
+                                                    tensorrt,load_model_only)
                     else:
                         self.process_net_action(False, action, monitors,
-                                                num_tests, tensorrt)
+                                                num_tests, tensorrt,load_model_only)
 
-    def process_net_action(self, clsname, key, monitors, num_tests, tensorrt):
+    def process_net_action(self, clsname, key, monitors, num_tests, tensorrt,load_model_only):
         print("Processing action " + key)
         write_to_log("Processing action " + key)
         if key in ["run_video","test"]:
-            net,time_callback = self.setup_network(clsname, tensorrt=tensorrt, test=True)
+            net,time_callback = self.setup_network(clsname, tensorrt=tensorrt, test=True,load_model_only=load_model_only)
         elif key in ["save_as_uff"]:
-            net,time_callback = self.setup_network(clsname, tensorrt=False, test=True)
+            net,time_callback = self.setup_network(clsname, tensorrt=False, test=True,load_model_only=load_model_only)
         else:
-            net,time_callback = self.setup_network(clsname, tensorrt=False)
+            net,time_callback = self.setup_network(clsname, tensorrt=False,load_model_only=load_model_only)
         if net.setup_completed:
             print("Setup completed")
             write_to_log("Setup completed")
@@ -255,20 +262,29 @@ class NetworkHandler:
         for metric in metrics:
             for root, dirs, files in os.walk(rootdir + "/" + metric):
                 for filename in files:
-                    if verbose_level == 1:
-                        print(metric,"/",filename)
-                    if "hist" in filename and "png" not in filename and "pdf" not in filename:
-                        testplotter.plot_history(combine, filename,
-                                                 rootdir + "/" + metric + "/" + filename,
-                                                 False, metric, save_figures, show_figures, session)
-                    elif "report" not in filename and "specs" not in filename and "predictions" not in filename and "png" not in filename and "times" not in filename and "pdf" not in filename:
-                        testplotter.plot_json(combine, filename,
-                                              rootdir + "/" + metric + "/" + filename,
-                                              False, gpu_specsdir, sys_specsdir, paramdictdir,
-                                              metric, save_figures, show_figures, session)
-                    elif "predictions" in filename:
-                        self.make_analysis(combine, filename, rootdir + "/" + metric + "/",
-                                           verbose, metric, save_figures, show_figures, session)
+                    if "png" not in filename and "pdf" not in filename:
+                        if verbose_level == 1:
+                            print(metric,"/",filename)
+                        if "hist" in filename:
+                            testplotter.plot_history(combine, filename,
+                                                     rootdir + "/" + metric + "/" + filename,
+                                                     False, metric, save_figures, show_figures, session)
+                        elif "report" not in filename and "data" not in filename and "specs" not in filename and "predictions" not in filename and "times" not in filename:
+                            testplotter.plot_json(combine, filename,
+                                                  rootdir + "/" + metric + "/" + filename,
+                                                  False, gpu_specsdir, sys_specsdir, paramdictdir,
+                                                  metric, save_figures, show_figures, session)
+                        elif "predictions" in filename:
+                            self.make_analysis(combine, filename, rootdir + "/" + metric + "/",
+                                               verbose, metric, save_figures, show_figures, session)
+                        elif "data_video_test.json" in filename:
+                            compare_to = []
+                            if self.paramdict["compare_to"]:
+                                compare_to = self.paramdict["compare_to"]
+                            testplotter.plot_video_data(combine, filename,
+                                                        rootdir + "/" + metric + "/" + filename,
+                                                        False, metric, save_figures, show_figures,
+                                                        session,compare_to=compare_to)
 
     def calibrate(self, net, cal_phase, monitors):
         verbose_level = self.paramdict["verbose_level"]
@@ -433,7 +449,7 @@ class NetworkHandler:
         for i in range (num_tests):
             print("******** FPS Predictions test: ", str(i+1),"*********")
             start_time = (round(time.time() * 1000))
-            fps_pred = net.model.predict(fps_X_test, verbose=0)
+            fps_pred = net.model.predict(fps_X_test, verbose=0) #TODO: Fix this for TensorRTNet
             end_time = int(round(time.time() * 1000))
             times.append((start_time,end_time))
             time_elapsed = end_time - start_time
@@ -462,22 +478,9 @@ class NetworkHandler:
             print("************ Finished testing net", net.classname, "************")
         write_to_log("Finshed testing for net " + net.classname)
 
-
     #def optimize_threshold(self, sesssion, net, mode = "binary-search", variable = "trad_acc"):
     #    pass
 
-
-    def make_binary_test_generator(self,binary_test_data_dir):
-        self.test_datagen = ImageDataGenerator(rescale=1. / 255)
-        self.test_data_generator = self.test_datagen.flow_from_directory(binary_test_data_dir,
-                                                                         target_size=(self.paramdict['imagedims'][0],
-                                                                                      self.paramdict['imagedims'][1]),
-                                                                         batch_size=self.paramdict['batch_size'],
-                                                                         class_mode='categorical',
-                                                                         shuffle=False)
-        test_true_classes = self.test_data_generator.classes
-        class_labels = list(self.test_data_generator.class_indices.keys())
-        return test_true_classes, class_labels
 
     # This method must be run after training and fine tuning, and preferably after testing the individual nets
     # TODO: Change keras_net.py so that this will work with MNIST, CIFAR etc.
@@ -504,12 +507,11 @@ class NetworkHandler:
         net_threads = []
         predictions = [None] * len(nets)
         built_ins = ["cifar10","cifar100","mnist"]
-        true_test_classes, class_labels = self.make_binary_test_generator(binary_test_data_dir)
+        true_test_classes, class_labels = net.make_binary_test_generator(binary_test_data_dir)
         for net in nets:
             if verbose_level == 1:
                 print(net.classname)
-            net.model._make_predict_function() # Initialize before threading
-            net.setup_binary_test(self.test_data_generator)
+            net.init_threading()
             returned = net.test("binary_testdatagen")
             predictions[class_labels.index(net.classname)] = returned
         if val:
@@ -545,7 +547,7 @@ class NetworkHandler:
             results = []
             start_time = int(round(time.time() * 1000))
             for net in nets:
-                results.append(pool.apply_async(net.model.predict, (fps_X_test,)))
+                results.append(pool.apply_async(net.my_predict, (fps_X_test,))) #TODO: Fix this for KerasNet
             pool.close()
             pool.join()
             fps_predictions = [r.get() for r in results]
@@ -699,12 +701,14 @@ class NetworkHandler:
 
     def run_video(self, net, monitors, output_weights):
         phase = "video_test"
+        tensorrt = self.paramdict["tensorrt"]
         if net.classname != "":
             phase = phase + "_" + net.classname
         verbose_level = self.paramdict["verbose_level"]
+        if tensorrt:
+            net.get_predictions(net.test_data_dir,setup_only=True) # Used to get class names
         if 'skvideo.io' not in sys.modules:
             import skvideo.io
-
         import cv2
         if "video_filepath" in self.paramdict:
             full_path = os.path.dirname(os.path.abspath(__file__)) + self.paramdict["video_filepath"]
@@ -720,25 +724,154 @@ class NetworkHandler:
             thr.do_run = True
             thr.start()
             threads.append(thr)
-        start_time = int((round(time.time() * 1000)))
+        start_time = 0
         frame_pred = []
+        layer_name = ""
+        suggest_bb = False
+        if "suggest_bb" in self.paramdict and "layer_name" in self.paramdict and self.paramdict["suggest_bb"]:
+            suggest_bb = True
+            cams = []
+            heatmaps = []
+            bbs = []
+            modeltype = self.paramdict["model"]
+            layer_name = self.paramdict["layer_name"]
+            frame_dims = self.paramdict["imagedims"]
+            num_classes = self.paramdict["nb_classes"]
+            if layer_name == "":
+                nb_lyr = 0
+                lastconv = ""
+                for l in net.model.layers:
+                    config = l.get_config()
+                    nb_lyr += 1
+                    if "conv" in config["name"]:
+                        lastconv = config["name"]
+                        #print(config["name"], " <-------- Last Convolutional Layer")
+                    #else:
+                    #    print(config["name"])
+                layer_name = lastconv
+                print(layer_name, ", ", nb_lyr)
+        preview_video = False
+        if "preview_video" in self.paramdict and self.paramdict["preview_video"]:
+            preview_video = True
+            import matplotlib.pyplot as plt
+            from matplotlib import gridspec
+            video_window = None
+            cam_window = None
+            heatmap_window = None
+            detection_window = None
+        tensors = []
+        count = 0
+        bb_count = 0
+        det_count = 0
+        frameskip = 0 # Number of frames to skip for CAM/Heatmap/Detection
+        K.set_learning_phase(0)
         for frame in videogen:
-            frame = cv2.resize(frame, (299, 299))
+            if count == 1:
+                start_time = int((round(time.time() * 1000)))
+            frame = cv2.resize(frame, (self.paramdict["imagedims"][0], self.paramdict["imagedims"][1]))
+            if preview_video:
+                if video_window is None:
+                    video_window = plt.subplot2grid((2, 3), (0, 0))
+                    video_window.set_title('Video feed')
+                    video_window = plt.imshow(frame,interpolation='nearest')
+                    detection_window = plt.subplot2grid((2, 3), (1, 0), colspan=3)
+                    plt.ion()
+                else:
+                    video_window.set_data(frame)
+                plt.pause(.1)
             img_tensor = kimage.img_to_array(frame)  # (height, width, channels)
             img_tensor = np.expand_dims(img_tensor, axis=0)
             img_tensor /= 255.
-            frame_pred.append(net.model.predict(img_tensor, verbose=0))
+            tensors.append(img_tensor)
+            if tensorrt:
+                frame_pred.append(net.my_predict(img_tensor))
+            else:
+                frame_pred.append(net.model.predict(img_tensor)[0])
+            if preview_video and det_count == frameskip:
+                det_count = 0
+                if detection_window is None:
+                    x = np.arange(0,len(frame_pred),1)
+                    detection_window = plt.subplot2grid((2, 3), (1, 0), colspan=3)
+                    detection_window = plt.plot(x,frame_pred)
+                else:
+                    x = np.arange(0,len(frame_pred),1)
+                    detection_window = plt.subplot2grid((2, 3), (1, 0), colspan=3)
+                    detection_window = plt.plot(x,frame_pred)
+                #plt.pause(.1)
+            else:
+                det_count += 1
+            if suggest_bb and not tensorrt:
+                if num_classes == 2 and frame_pred[count][1] > 0.5 and bb_count == frameskip:
+                    bb_count = 0
+                    cam, heatmap = gradcam.process_frame(img_tensor, net.model, modeltype, 1, layer_name, frame_dims, num_classes)
+                    cams.append(cam)
+                    heatmaps.append(heatmap)
+                    if preview_video:
+                        #cv2.imshow("CAM Preview",cam)
+                        #cv2.waitKey(1)
+                        #cv2.imshow("Heatmap Preview",heatmap)
+                        #cv2.waitKey(1)
+                        if cam_window is None:
+                            cam_window = plt.subplot2grid((2, 3), (0, 1))
+                            cam_window.set_title('CAM')
+                            cam_window = plt.imshow(cam,interpolation='nearest',cmap='viridis')
+                        else:
+                            cam_window.set_data(cam)
+                            cam_window.autoscale()
+                        if heatmap_window is None:
+                            heatmap_window = plt.subplot2grid((2, 3), (0, 2))
+                            heatmap_window.set_title('Heatmap')
+                            heatmap_window = plt.imshow(heatmap,interpolation='nearest', cmap='viridis')
+                        else:
+                            heatmap_window.set_data(heatmap)
+                            cam_window.autoscale()
+                        plt.pause(.1)
+                elif frame_pred[count][1] > 0.5:
+                    bb_count += 1
+            count += 1
+        plt.ioff()
+        plt.tight_layout()
+        plt.show()
         end_time = int(round(time.time() * 1000))
         time_elapsed = end_time - start_time
-        fps = len(frame_pred)/(time_elapsed/1000)
+        fps = (len(frame_pred)-1)/(time_elapsed/1000)
+
+        start_time_fast = int((round(time.time() * 1000)))
+        frame_pred_fast = []
+        count_fast = 0
+        for tensor in tensors:
+            if tensorrt:
+                frame_pred_fast.append(net.my_predict(tensor))
+            else:
+                frame_pred_fast.append(net.model.predict(tensor)[0])
+            count += 1
+        end_time_fast = int(round(time.time() * 1000))
+        time_elapsed_fast = end_time_fast - start_time_fast
+        fps_fast = (len(frame_pred_fast)-1)/(time_elapsed_fast/1000)
+        #print(frame_pred)
+        storage_dict = {}
+        storage_dict["predictions"] = frame_pred
+        storage_dict["video"] = self.paramdict["video_filepath"]
+        storage_dict["num_frames"] = len(frame_pred)
+        storage_dict["fps"] = fps
+        storage_dict["fps_fast"] = fps_fast
+        storage_dict["frame_dims"] = self.paramdict["imagedims"]
+        storage_dict["nb_classes"] = self.paramdict["nb_classes"]
+        storage_dict["tensorrt"] = self.paramdict["tensorrt"]
+        storage_dict["session"] = self.paramdict["session"]
+        storage_dict["network_type"] = self.paramdict["network_type"]
+        storage_dict["model_precision"] = self.paramdict["model_precision"]
+        storage_dict["model"] = self.paramdict["model"]
+        storage_dict["dataset"] = self.paramdict["dataset"]
+        storage_dict["class_indices"] = net.class_indices
+        self.save_report_dict(storage_dict,"data_video_test.json")
         for t in threads:
             t.do_run = False
         if verbose_level == 1:
             print("************ Finished running video ************")
-            print("Number of Frames: " + str(len(frame_pred)) + " | FPS: " + str(fps))
+            print("Number of Frames: " + str(len(frame_pred)) + " | FPS: " + str(fps) + " | FPS on tensors: " + str(fps_fast))
         write_to_log("Finished running video")
-        write_to_log("Number of Frames: " + str(len(frame_pred)) + " | FPS: " + str(fps))
-
+        write_to_log("Number of Frames: " + str(len(frame_pred)) + " | FPS: " + str(fps) + " | FPS on tensors: " + str(fps_fast))
 
     def sklearn_score(self, test_predictions, true_classes, class_labels):
         predicted_classes = np.argmax(test_predictions,axis=1)
@@ -924,8 +1057,7 @@ if __name__ == '__main__':
                     write_to_log("Started processing " + str(file))
                     if paramdict["setup"] or paramdict["train"] \
                     or paramdict["fine_tune"] or paramdict["test"] \
-                    or paramdict["save_as_uff"] or paramdict["run_video"] \
-                    or paramdict["tensorrt_test"]:
+                    or paramdict["save_as_uff"] or paramdict["run_video"]:
                         paramcpy = paramdict.copy()
                         paramcpy["binary_test"] = False
                         if "binary_val_test" in paramcpy:
