@@ -1,6 +1,7 @@
 .idea/
 TFmetrics.iml
 mkl-dnn/
+server/network/datasets/
 server/network/datasets/cifar-100/
 server/network/datasets/kvasir/
 server/network/datasets/kvasir-dataset-v2/
@@ -13,6 +14,7 @@ server/network/model/kvasir/
 server/network/model/kvasir-folds/
 server/network/model/kvasir-nerthus-combined/
 server/network/model/nerthus/
+server/network/model/ous-study/
 server/server.iml
 server/virtualenv/
 static/
@@ -32,3 +34,4 @@ server/logs/
 server/database/
 server/network/datasets/kvasir-dataset-v2-features/
 server/param_files/
+tfmetrics/
