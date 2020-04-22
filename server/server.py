@@ -86,8 +86,7 @@ class NetworkHandler:
             net = KerasNet(self.paramdict, callbacks, cls,load_model_only)
         metrics = ['accuracy'] #kermet.fmeasure, kermet.recall, kermet.precision,
                    #kermet.matthews_correlation, kermet.true_pos,
-                   #kermet.true_neg, kermet.false_pos, kermet.false_neg, kermet.specificity]
-
+                   #kermet.true_neg, kermet.false_pos, kermet.false_neg, kermet.specificity
         if net.setup_completed:
             print("Setup completed")
             write_to_log("Setup completed")
@@ -112,6 +111,8 @@ class NetworkHandler:
                     net.load_model_weights(os.path.dirname(os.path.abspath(__file__))
                                             + "/network/model/" + dataset + "/" + session
                                             + "/model_weights.hdf5")
+        else:
+            print("Network was not setup successfully")
         return net, time_callback
 
 
@@ -212,7 +213,7 @@ class NetworkHandler:
         dir = os.path.dirname(os.path.abspath(__file__)) + '/metrics/storage/sessions/' + self.paramdict["session"] \
               + "/kerasmon/"
         with open(dir + name, 'w') as f:
-            json.dump(hist.history, f)
+            json.dump(str(hist.history), f)
 
     def save_report(self, report, name):
         dir = os.path.dirname(os.path.abspath(__file__)) + '/metrics/storage/sessions/' + self.paramdict["session"] \
@@ -287,27 +288,28 @@ class NetworkHandler:
                                                         session,compare_to=compare_to)
 
     def calibrate(self, net, cal_phase, monitors):
-        verbose_level = self.paramdict["verbose_level"]
-        if verbose_level == 1:
-            print("************ Started calibration for net", net.classname, "************")
-            print("Calibration for 1 minute")
-        write_to_log("Started calibration for net " + net.classname)
-        threads = []
-        phase = "calibration"
-        if net.classname != "":
-            phase = cal_phase + "_" + phase + "_" + net.classname
-        for monitor in monitors:
-            thr = threading.Thread(target=monitor.start_monitoring, args=(self.paramdict, phase, self.paramdict["session"]))
-            thr.deamon = True
-            thr.do_run = True
-            thr.start()
-            threads.append(thr)
-        time.sleep(60)
-        for t in threads:
-            t.do_run = False
-        if verbose_level == 1:
-            print("************ Finished calibration for net", net.classname, "************")
-        write_to_log("Finished calibration for net " + net.classname)
+        if self.paramdict["calibrate"]:
+            verbose_level = self.paramdict["verbose_level"]
+            if verbose_level == 1:
+                print("************ Started calibration for net", net.classname, "************")
+                print("Calibration for 1 minute")
+            write_to_log("Started calibration for net " + net.classname)
+            threads = []
+            phase = "calibration"
+            if net.classname != "":
+                phase = cal_phase + "_" + phase + "_" + net.classname
+            for monitor in monitors:
+                thr = threading.Thread(target=monitor.start_monitoring, args=(self.paramdict, phase, self.paramdict["session"]))
+                thr.deamon = True
+                thr.do_run = True
+                thr.start()
+                threads.append(thr)
+            time.sleep(60)
+            for t in threads:
+                t.do_run = False
+            if verbose_level == 1:
+                print("************ Finished calibration for net", net.classname, "************")
+            write_to_log("Finished calibration for net " + net.classname)
 
     def train_net(self, net, monitors, time_callback):
         verbose_level = self.paramdict["verbose_level"]
@@ -316,6 +318,9 @@ class NetworkHandler:
         write_to_log("Started training for net " + net.classname)
         threads = []
         phase = "train"
+        if self.paramdict["resume"]:
+            net.load_top_weights()
+
         if net.classname != "":
             phase = phase + "_" + net.classname
         for monitor in monitors:
@@ -343,7 +348,12 @@ class NetworkHandler:
         write_to_log("Started fine tuning for net " + net.classname)
         threads = []
         phase = "fine_tune"
-        net.load_top_weights()
+        if self.paramdict["resume"]:
+            net.load_model_weights(os.path.dirname(os.path.abspath(__file__))
+                + "/network/model/" + dataset + "/" + session
+                + "/model_weights.hdf5")
+        else:
+            net.load_top_weights()
         if net.classname != "":
             phase = phase + "_" + net.classname
         for monitor in monitors:
@@ -384,8 +394,7 @@ class NetworkHandler:
         dataset = self.paramdict["dataset"]
         session = self.paramdict["session"]
         testmode = self.paramdict["testmode"]
-        test_data_dir = os.path.dirname(os.path.abspath(__file__)) \
-                        + "/network" + self.paramdict["test_data_dir"]
+        test_data_dir = self.paramdict["test_data_dir"]
         network_type = self.paramdict["network_type"]
         if "binary" in network_type:
             test_data_dir = test_data_dir + "/" + net.classname + "/"
@@ -434,33 +443,39 @@ class NetworkHandler:
         if verbose_level == 1:
             print("************ Trying to open test data for FPS from: ", test_data_dir, "************")
         write_to_log("Trying to open test data for FPS from: " + test_data_dir)
-        if not any(x in dataset for x in built_ins):
-            fps_X_test, fps_y_test, classes = loadimg.getimagedataandlabels(test_data_dir,
-                                                                            net.paramdict['imagedims'][0],
-                                                                            net.paramdict['imagedims'][1],
-                                                                            verbose=True,
-                                                                            mode=testmode)
-        for monitor in monitors:
-            thr = threading.Thread(target=monitor.start_monitoring, args=(self.paramdict, phase, self.paramdict["session"]))
-            thr.deamon = True
-            thr.do_run = True
-            thr.start()
-            threads.append(thr)
-        for i in range (num_tests):
-            print("******** FPS Predictions test: ", str(i+1),"*********")
-            start_time = (round(time.time() * 1000))
-            fps_pred = net.model.predict(fps_X_test, verbose=0) #TODO: Fix this for TensorRTNet
-            end_time = int(round(time.time() * 1000))
-            times.append((start_time,end_time))
-            time_elapsed = end_time - start_time
-            elapsed_times.append(time_elapsed)
-            fps = len(fps_pred)/(time_elapsed/1000)
-            fps_arr.append(fps)
-        for t in threads:
-            t.do_run = False
-        if verbose_level == 1:
-            print("************ Finished FPS testing net on test set, generating report ************")
-        write_to_log("Finished FPS testing net on test set, generating report")
+        try:
+            if not any(x in dataset for x in built_ins):
+                fps_X_test, fps_y_test, classes = loadimg.getimagedataandlabels(test_data_dir,
+                                                                                net.paramdict['imagedims'][0],
+                                                                                net.paramdict['imagedims'][1],
+                                                                                verbose=True,
+                                                                                mode=testmode)
+            for monitor in monitors:
+                thr = threading.Thread(target=monitor.start_monitoring, args=(self.paramdict, phase, self.paramdict["session"]))
+                thr.deamon = True
+                thr.do_run = True
+                thr.start()
+                threads.append(thr)
+            for i in range (num_tests):
+                print("******** FPS Predictions test: ", str(i+1),"*********")
+                start_time = (round(time.time() * 1000))
+                fps_pred = net.model.predict(fps_X_test, verbose=0)
+                end_time = int(round(time.time() * 1000))
+                times.append((start_time,end_time))
+                time_elapsed = end_time - start_time
+                elapsed_times.append(time_elapsed)
+                fps = len(fps_pred)/(time_elapsed/1000)
+                fps_arr.append(fps)
+            for t in threads:
+                t.do_run = False
+            if verbose_level == 1:
+                print("************ Finished FPS testing net on test set, generating report ************")
+            write_to_log("Finished FPS testing net on test set, generating report")
+        except:
+            e = sys.exc_info()[0]
+            tb = traceback.format_exc()
+            print("Error: ", str(e), " while processing ", file, tb)
+            write_to_log("Error: " + str(e) + " while processing " + str(file) + str(tb))
         test_report, report_dict["test"] = self.score_test(class_labels,
                                                            predictions,
                                                            y_test,
@@ -1082,7 +1097,7 @@ if __name__ == '__main__':
                 except:
                     e = sys.exc_info()[0]
                     tb = traceback.format_exc()
-                    print("Error: ", e, " while processing ", file, tb)
+                    print("Error: ", str(e), " while processing ", file, tb)
                     write_to_log("Error: " + str(e) + " while processing " + str(file) + str(tb))
                     # os.rename(paramdir + file, paramdir + "broken/" + file)
             else:

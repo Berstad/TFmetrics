@@ -270,7 +270,12 @@ def plot_history(combine, figname, filepath, verbose, library, save=True, show=T
     if not combine:
         plt.rcParams.update({'font.size': 14})
     with open(filepath) as json_data:
-        metrics = json.load(json_data)
+        data_string = json_data.read()
+        print(data_string)
+        data_string = data_string.replace("\"", "")
+        data_string = data_string.replace("\'", "\"")
+        print(data_string)
+        metrics = json.loads(data_string)
     with open(os.path.dirname(os.path.abspath(__file__)) + "/metrics/dicts/units.json") as json_data:
         units = json.load(json_data)
     met_index = 0
