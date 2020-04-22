@@ -88,8 +88,9 @@ class PsMon(threading.Thread):
         specs = {}
         specs["cpu_name"] = self.get_processor_name()
         specs["cpu_cores_logical"] = psutil.cpu_count()
-        specs["cpu_freq_min"] = psutil.cpu_freq().min
-        specs["cpu_freq_max"] = psutil.cpu_freq().max
+        if psutil.cpu_freq() is not None:
+            specs["cpu_freq_min"] = psutil.cpu_freq().min
+            specs["cpu_freq_max"] = psutil.cpu_freq().max
         specs["memory"] = psutil.virtual_memory().total
         with open(os.path.dirname(os.path.abspath(__file__)) + '/storage/sessions/'
                   + sessionid + '/psmon/system_specs.json', 'w') as f:

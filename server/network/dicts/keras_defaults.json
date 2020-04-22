@@ -1,0 +1,47 @@
+{
+  "sgd": {
+    "lr": 0.1,
+    "momentum": 0.0,
+    "decay": 0.0,
+    "nesterov": false
+  },
+  "rmsprop": {
+    "lr": 0.001,
+    "rho": 0.9,
+    "epsilon": null,
+    "decay": false
+  },
+  "adagrad": {
+    "lr": 0.01,
+    "epsilon": null,
+    "decay": 0.0
+  },
+  "adadelta": {
+    "lr": 0.01,
+    "epsilon": null,
+    "rho": 0.95,
+    "decay": 0.0
+  },
+  "adam": {
+    "lr": 0.001,
+    "beta_1": 0.9,
+    "beta_2": 0.999,
+    "epsilon": null,
+    "decay": 0.0,
+    "amsgrad": false
+  },
+  "adamax": {
+    "lr": 0.002,
+    "beta_1": 0.9,
+    "beta_2": 0.999,
+    "epsilon": null,
+    "decay": 0.0
+  },
+  "nadam": {
+    "lr": 0.002,
+    "beta_1": 0.9,
+    "beta_2": 0.999,
+    "epsilon": null,
+    "schedule_decay": 0.0
+  }
+}

@@ -11,7 +11,7 @@ __status__ = "Development"
 # This file is subject to the terms and conditions defined in
 # file 'LICENSE.md', which is part of this source code package.
 
-from flask import Flask
+# from flask import Flask
 import json
 import os
 from metrics.met_nvidia import NvMon
@@ -28,24 +28,27 @@ import time
 import datetime
 from network.keras_net import KerasNet, TimeHistory
 import network.packages.images.loadimg as loadimg
+import network.packages.gradcam.gradcam as gradcam
 from multiprocessing.pool import ThreadPool
+from keras.preprocessing import image as kimage
+import keras.backend as K
 import argparse
 import traceback
 import sklearn.metrics as metrics
 from keras.preprocessing.image import ImageDataGenerator
 
-app = Flask(__name__)
+# app = Flask(__name__)
 
 
-@app.route('/')
+# @app.route('/')
 
 
-@app.route('/network/<networkname>', methods=['GET', 'POST'])
-def network_admin(networkname):
+#@app.route('/network/<networkname>', methods=['GET', 'POST'])
+#def network_admin(networkname):
     # Administrate the network with the given name
     # GET to this should return current information about the network
     # GET with payload is defined in docs for API
-    pass
+#    pass
 
 
 def walkerror(error):
@@ -70,32 +73,57 @@ class NetworkHandler:
     def __init__(self,paramdict_in):
         self.paramdict = paramdict_in
 
-    def setup_network(self, cls = None,test_only = False):
-        time_callback = TimeHistory()
-        callbacks = [time_callback]
-        net = KerasNet(self.paramdict, callbacks, cls)
+    def setup_network(self, cls = None,test = False, tensorrt = False, load_model_only = False):
+        time_callback = None
+        dataset = self.paramdict["dataset"]
+        session = self.paramdict["session"]
+        if tensorrt:
+            from network.tensorrt_net import TensorRTNet
+            net = TensorRTNet(self.paramdict, cls)
+        else:
+            time_callback = TimeHistory()
+            callbacks = [time_callback]
+            net = KerasNet(self.paramdict, callbacks, cls,load_model_only)
         metrics = ['accuracy'] #kermet.fmeasure, kermet.recall, kermet.precision,
                    #kermet.matthews_correlation, kermet.true_pos,
-                   #kermet.true_neg, kermet.false_pos, kermet.false_neg, kermet.specificity]
-
-        if net.setup_completed and not test_only:
+                   #kermet.true_neg, kermet.false_pos, kermet.false_neg, kermet.specificity
+        if net.setup_completed:
+            print("Setup completed")
+            write_to_log("Setup completed")
+            if not tensorrt:
+                num_layers = len(net.model.layers)
+                print("Number of layers: ", num_layers)
+                write_to_log("Number of layers: " + str(num_layers))
+            path = os.path.dirname(os.path.abspath(__file__)) + '/metrics/storage/sessions/' + self.paramdict["session"] + "/"
+            if not test:
+                net.save_model_vis(path, "model_visualization_" + str(net.classname or '') + ".png")
+                print("Wrote model visualization to session folder " + self.paramdict["session"])
+                write_to_log("Wrote model visualization to session folder " + self.paramdict["session"])
+                net.freeze_base_model()
             net.gen_data(save_preview=self.paramdict["save_preview"])
             net.compile_setup(metrics)
-            path = os.path.dirname(os.path.abspath(__file__)) + '/metrics/storage/sessions/' + self.paramdict["session"] + "/"
-            # net.save_model_vis(path, "model_visualization_" + str(net.classname or '') + ".png")
-            print("Wrote model visualization to session folder " + self.paramdict["session"])
-            write_to_log("Wrote model visualization to session folder " + self.paramdict["session"])
+            if test and not load_model_only:
+                if net.classname != "":
+                    net.load_model_weights(os.path.dirname(os.path.abspath(__file__))
+                                            + "/network/model/" + dataset + "/" + session
+                                            + "/" + net.classname + "/model_weights.hdf5")
+                else:
+                    net.load_model_weights(os.path.dirname(os.path.abspath(__file__))
+                                            + "/network/model/" + dataset + "/" + session
+                                            + "/model_weights.hdf5")
         else:
             print("Network was not setup successfully")
         return net, time_callback
 
+
     def run_with_monitors(self, monitors=[]):
-        setup = self.paramdict["setup"]
-        train = self.paramdict["train"]
-        fine_tune = self.paramdict["fine_tune"]
-        test = self.paramdict["test"]
+        priority = ["setup","train","fine_tune","save_as_uff","test","run_video"]
         binary_test = self.paramdict["binary_test"]
         verbose_level = self.paramdict["verbose_level"]
+        if "tensorrt" in self.paramdict:
+            tensorrt = self.paramdict["tensorrt"]
+        else:
+            tensorrt = False
         if "num_tests" in self.paramdict:
             num_tests = self.paramdict["num_tests"]
         else:
@@ -104,20 +132,20 @@ class NetworkHandler:
             binary_val_test = self.paramdict["binary_val_test"]
         else:
             binary_val_test = False
+        if "load_model_only" in self.paramdict:
+            load_model_only = paramdict["load_model_only"]
+        else:
+            load_model_only = False
         if binary_val_test:
             classes = self.get_classes_from_folder("/network" + self.paramdict["binary_test_data_dir"])
             print(classes)
             nets = []
             for cls in classes:
-                net,time_callback = self.setup_network(cls)
+                net,time_callback = self.setup_network(cls,test=True,load_model_only=load_model_only)
                 nets.append(net)
-                num_layers = len(net.model.layers)
-                if net.setup_completed:
-                    print("Setup completed")
-                    write_to_log("Setup completed")
-                    print("Number of layers: ", num_layers)
-                    write_to_log("Number of layers: " + str(num_layers))
-            self.test_binary_nets(nets,monitors,"parallell",self.paramdict["output_class_weights"],num_tests = num_tests, val = True)
+            self.test_binary_nets(nets, monitors, "parallell",
+                                  self.paramdict["output_class_weights"],
+                                  num_tests = num_tests, val = True)
             del nets
             print("Deleted nets to free memory")
             write_to_log("Deleted nets to free memory")
@@ -126,142 +154,60 @@ class NetworkHandler:
             print(classes)
             nets = []
             for cls in classes:
-                net,time_callback = self.setup_network(cls)
+                net,time_callback = self.setup_network(cls,test=True,load_model_only=load_model_only)
                 nets.append(net)
-                num_layers = len(net.model.layers)
-                if net.setup_completed:
-                    print("Setup completed")
-                    write_to_log("Setup completed")
-                    print("Number of layers: ", num_layers)
-                    write_to_log("Number of layers: " + str(num_layers))
-            self.test_binary_nets(nets,monitors,"parallell",self.paramdict["output_class_weights"],num_tests = num_tests, val = False)
+            self.test_binary_nets(nets, monitors, "parallell",
+                                  self.paramdict["output_class_weights"],
+                                  num_tests = num_tests, val = False)
             del nets
             print("Deleted nets to free memory")
             write_to_log("Deleted nets to free memory")
         else:
-            if setup:
-                if self.paramdict["network_type"] == "binary":
-                    classes = self.get_classes_from_folder("/network" + self.paramdict["train_data_dir"])
-                    print(classes)
-                    for cls in classes:
-                        net,time_callback = self.setup_network(cls)
-                        num_layers = len(net.model.layers)
-                        if net.setup_completed:
-                            print("Setup completed")
-                            write_to_log("Setup completed")
-                            print("Number of layers: ", num_layers)
-                            write_to_log("Number of layers: " + str(num_layers))
-                        net.clear_session()
-                        del net
-                        print("Deleted net to free memory")
-                        write_to_log("Deleted net to free memory")
-                else:
-                    net,time_callback = self.setup_network()
-                    num_layers = len(net.model.layers)
-                    if net.setup_completed:
-                        print("Setup completed")
-                        write_to_log("Setup completed")
-                        print("Number of layers: ", num_layers)
-                        write_to_log("Number of layers: " + str(num_layers))
-                    net.clear_session()
-                    del net
-                    print("Deleted net to free memory")
-                    write_to_log("Deleted net to free memory")
-            if train:
-                if self.paramdict["network_type"] == "binary":
-                    classes = self.get_classes_from_folder("/network" + self.paramdict["train_data_dir"])
-                    print(classes)
-                    for cls in classes:
-                        net,time_callback = self.setup_network(cls)
-                        num_layers = len(net.model.layers)
-                        if net.setup_completed:
-                            print("Setup completed")
-                            write_to_log("Setup completed")
-                            print("Number of layers: ", num_layers)
-                            write_to_log("Number of layers: " + str(num_layers))
-                            self.calibrate(net, "train", monitors)
-                            self.train_net(net, monitors, time_callback)
-                        net.clear_session()
-                        del net
-                        print("Deleted net to free memory")
-                        write_to_log("Deleted net to free memory")
-                else:
-                    net,time_callback = self.setup_network()
-                    num_layers = len(net.model.layers)
-                    if net.setup_completed:
-                        print("Setup completed")
-                        write_to_log("Setup completed")
-                        print("Number of layers: ", num_layers)
-                        write_to_log("Number of layers: " + str(num_layers))
-                        self.calibrate(net, "train", monitors)
-                        self.train_net(net, monitors, time_callback)
-                    net.clear_session()
-                    del net
-                    print("Deleted net to free memory")
-                    write_to_log("Deleted net to free memory")
-            if fine_tune:
-                if self.paramdict["network_type"] == "binary":
-                    classes = self.get_classes_from_folder("/network" + self.paramdict["train_data_dir"])
-                    print(classes)
-                    for cls in classes:
-                        net,time_callback = self.setup_network(cls)
-                        num_layers = len(net.model.layers)
-                        if net.setup_completed:
-                            print("Setup completed")
-                            write_to_log("Setup completed")
-                            print("Number of layers: ", num_layers)
-                            write_to_log("Number of layers: " + str(num_layers))
-                            self.calibrate(net, "fine_tune", monitors)
-                            self.fine_tune_net(net, monitors, time_callback)
-                        net.clear_session()
-                        del net
-                        print("Deleted net to free memory")
-                        write_to_log("Deleted net to free memory")
-                else:
-                    net,time_callback = self.setup_network()
-                    num_layers = len(net.model.layers)
-                    if net.setup_completed:
-                        print("Setup completed")
-                        write_to_log("Setup completed")
-                        print("Number of layers: ", num_layers)
-                        write_to_log("Number of layers: " + str(num_layers))
-                        self.calibrate(net, "fine_tune", monitors)
-                        self.fine_tune_net(net, monitors, time_callback)
-                    net.clear_session()
-                    del net
-                    print("Deleted net to free memory")
-                    write_to_log("Deleted net to free memory")
-            if test:
-                if self.paramdict["network_type"] == "binary":
-                    classes = self.get_classes_from_folder("/network" + self.paramdict["train_data_dir"])
-                    print(classes)
-                    for cls in classes:
-                        net,time_callback = self.setup_network(cls)
-                        num_layers = len(net.model.layers)
-                        if net.setup_completed:
-                            print("Setup completed")
-                            write_to_log("Setup completed")
-                            print("Number of layers: ", num_layers)
-                            write_to_log("Number of layers: " + str(num_layers))
-                            self.calibrate(net, "test", monitors)
-                            self.test_net(net, monitors, net.paramdict["output_class_weights"],num_tests=num_tests)
-                        net.clear_session()
-                        del net
-                        print("Deleted net to free memory")
-                        write_to_log("Deleted net to free memory")
-                else:
-                    net,time_callback = self.setup_network()
-                    num_layers = len(net.model.layers)
-                    if net.setup_completed:
-                        print("Setup completed")
-                        write_to_log("Setup completed")
-                        print("Number of layers: ", num_layers)
-                        write_to_log("Number of layers: " + str(num_layers))
-                        self.calibrate(net, "test", monitors)
-                        self.test_net(net, monitors, net.paramdict["output_class_weights"],num_tests=num_tests)
-                    del net
-                    print("Deleted net to free memory")
-                    write_to_log("Deleted net to free memory")
+            for action in priority:
+                if action in self.paramdict and self.paramdict[action] == True:
+                    if self.paramdict["network_type"] == "binary":
+                        classes = self.get_classes_from_folder("/network" + self.paramdict["train_data_dir"])
+                        print(classes)
+                        for clsname in classes:
+                            self.process_net_action(clsname, action,
+                                                    monitors, num_tests,
+                                                    tensorrt,load_model_only)
+                    else:
+                        self.process_net_action(False, action, monitors,
+                                                num_tests, tensorrt,load_model_only)
+
+    def process_net_action(self, clsname, key, monitors, num_tests, tensorrt,load_model_only):
+        print("Processing action " + key)
+        write_to_log("Processing action " + key)
+        if key in ["run_video","test"]:
+            net,time_callback = self.setup_network(clsname, tensorrt=tensorrt, test=True,load_model_only=load_model_only)
+        elif key in ["save_as_uff"]:
+            net,time_callback = self.setup_network(clsname, tensorrt=False, test=True,load_model_only=load_model_only)
+        else:
+            net,time_callback = self.setup_network(clsname, tensorrt=False,load_model_only=load_model_only)
+        if net.setup_completed:
+            print("Setup completed")
+            write_to_log("Setup completed")
+            if key not in ["setup","save_as_uff","run_video"]:
+                self.calibrate(net, key, monitors)
+            if key == "train":
+                self.train_net(net, monitors, time_callback)
+            if key == "fine_tune":
+                self.fine_tune_net(net, monitors, time_callback)
+            if key == "test":
+                self.test_net(net, monitors,
+                              net.paramdict["output_class_weights"],
+                              num_tests=num_tests)
+            if key == "run_video":
+                self.run_video(net, monitors,
+                               net.paramdict["output_class_weights"])
+            if key == "save_as_uff":
+                net.save_as_uff()
+        net.clear_session()
+        del net
+        print("Deleted net to free memory")
+        write_to_log("Deleted net to free memory")
+
 
     def save_history(self, hist, name):
         dir = os.path.dirname(os.path.abspath(__file__)) + '/metrics/storage/sessions/' + self.paramdict["session"] \
@@ -317,20 +263,29 @@ class NetworkHandler:
         for metric in metrics:
             for root, dirs, files in os.walk(rootdir + "/" + metric):
                 for filename in files:
-                    if verbose_level == 1:
-                        print(metric,"/",filename)
-                    if "hist" in filename and "png" not in filename and "pdf" not in filename:
-                        testplotter.plot_history(combine, filename,
-                                                 rootdir + "/" + metric + "/" + filename,
-                                                 False, metric, save_figures, show_figures, session)
-                    elif "report" not in filename and "specs" not in filename and "predictions" not in filename and "png" not in filename and "times" not in filename and "pdf" not in filename:
-                        testplotter.plot_json(combine, filename,
-                                              rootdir + "/" + metric + "/" + filename,
-                                              False, gpu_specsdir, sys_specsdir, paramdictdir,
-                                              metric, save_figures, show_figures, session)
-                    elif "predictions" in filename:
-                        self.make_analysis(combine, filename, rootdir + "/" + metric + "/",
-                                           verbose, metric, save_figures, show_figures, session)
+                    if "png" not in filename and "pdf" not in filename:
+                        if verbose_level == 1:
+                            print(metric,"/",filename)
+                        if "hist" in filename:
+                            testplotter.plot_history(combine, filename,
+                                                     rootdir + "/" + metric + "/" + filename,
+                                                     False, metric, save_figures, show_figures, session)
+                        elif "report" not in filename and "data" not in filename and "specs" not in filename and "predictions" not in filename and "times" not in filename:
+                            testplotter.plot_json(combine, filename,
+                                                  rootdir + "/" + metric + "/" + filename,
+                                                  False, gpu_specsdir, sys_specsdir, paramdictdir,
+                                                  metric, save_figures, show_figures, session)
+                        elif "predictions" in filename:
+                            self.make_analysis(combine, filename, rootdir + "/" + metric + "/",
+                                               verbose, metric, save_figures, show_figures, session)
+                        elif "data_video_test.json" in filename:
+                            compare_to = []
+                            if self.paramdict["compare_to"]:
+                                compare_to = self.paramdict["compare_to"]
+                            testplotter.plot_video_data(combine, filename,
+                                                        rootdir + "/" + metric + "/" + filename,
+                                                        False, metric, save_figures, show_figures,
+                                                        session,compare_to=compare_to)
 
     def calibrate(self, net, cal_phase, monitors):
         if self.paramdict["calibrate"]:
@@ -431,7 +386,8 @@ class NetworkHandler:
             print("************ Finished fine tuning net", net.classname, "************")
         write_to_log("Finished fine tuning for net " + net.classname)
 
-    def test_net(self, net, monitors, output_weights=[], num_tests=10):
+    def test_net(self, net, monitors, output_weights=[],
+                 num_tests=10):
         verbose_level = self.paramdict["verbose_level"]
         train = self.paramdict["train"]
         fine_tune = self.paramdict["fine_tune"]
@@ -452,15 +408,6 @@ class NetworkHandler:
         report_dict = {}
         threads = []
         phase = "test"
-        if net.classname != "":
-            phase = phase + "_" + net.classname
-            net.load_model_weights(os.path.dirname(os.path.abspath(__file__))
-                                    + "/network/model/" + dataset + "/" + session
-                                    + "/" + net.classname + "/model_weights.hdf5")
-        else:
-            net.load_model_weights(os.path.dirname(os.path.abspath(__file__))
-                                    + "/network/model/" + dataset + "/" + session
-                                    + "/model_weights.hdf5")
         if verbose_level == 1:
             print("************ Started testing net on validation set ************")
         write_to_log("Started testing net on validation set")
@@ -546,22 +493,9 @@ class NetworkHandler:
             print("************ Finished testing net", net.classname, "************")
         write_to_log("Finshed testing for net " + net.classname)
 
+    #def optimize_threshold(self, sesssion, net, mode = "binary-search", variable = "trad_acc"):
+    #    pass
 
-    def optimize_threshold(self, sesssion, net, mode = "binary-search", variable = "trad_acc"):
-        pass
-
-
-    def make_binary_test_generator(self,binary_test_data_dir):
-        self.test_datagen = ImageDataGenerator(rescale=1. / 255)
-        self.test_data_generator = self.test_datagen.flow_from_directory(binary_test_data_dir,
-                                                                         target_size=(self.paramdict['imagedims'][0],
-                                                                                      self.paramdict['imagedims'][1]),
-                                                                         batch_size=self.paramdict['batch_size'],
-                                                                         class_mode='categorical',
-                                                                         shuffle=False)
-        test_true_classes = self.test_data_generator.classes
-        class_labels = list(self.test_data_generator.class_indices.keys())
-        return test_true_classes, class_labels
 
     # This method must be run after training and fine tuning, and preferably after testing the individual nets
     # TODO: Change keras_net.py so that this will work with MNIST, CIFAR etc.
@@ -588,15 +522,11 @@ class NetworkHandler:
         net_threads = []
         predictions = [None] * len(nets)
         built_ins = ["cifar10","cifar100","mnist"]
-        true_test_classes, class_labels = self.make_binary_test_generator(binary_test_data_dir)
+        true_test_classes, class_labels = net.make_binary_test_generator(binary_test_data_dir)
         for net in nets:
             if verbose_level == 1:
                 print(net.classname)
-            net.load_model_weights(os.path.dirname(os.path.abspath(__file__))
-                                      + "/network/model/" + dataset + "/" + session
-                                      + "/" + net.classname + "/model_weights.hdf5")
-            net.model._make_predict_function() # Initialize before threading
-            net.setup_binary_test(self.test_data_generator)
+            net.init_threading()
             returned = net.test("binary_testdatagen")
             predictions[class_labels.index(net.classname)] = returned
         if val:
@@ -632,7 +562,7 @@ class NetworkHandler:
             results = []
             start_time = int(round(time.time() * 1000))
             for net in nets:
-                results.append(pool.apply_async(net.model.predict, (fps_X_test,)))
+                results.append(pool.apply_async(net.my_predict, (fps_X_test,))) #TODO: Fix this for KerasNet
             pool.close()
             pool.join()
             fps_predictions = [r.get() for r in results]
@@ -784,6 +714,180 @@ class NetworkHandler:
                      + ", Avg FPS: " + str(np.mean(fps_arr)))
         return report, report_dict
 
+    def run_video(self, net, monitors, output_weights):
+        phase = "video_test"
+        tensorrt = self.paramdict["tensorrt"]
+        if net.classname != "":
+            phase = phase + "_" + net.classname
+        verbose_level = self.paramdict["verbose_level"]
+        if tensorrt:
+            net.get_predictions(net.test_data_dir,setup_only=True) # Used to get class names
+        if 'skvideo.io' not in sys.modules:
+            import skvideo.io
+        import cv2
+        if "video_filepath" in self.paramdict:
+            full_path = os.path.dirname(os.path.abspath(__file__)) + self.paramdict["video_filepath"]
+            videogen = skvideo.io.vreader(full_path)
+        if verbose_level == 1:
+            print("************ Started running video ************")
+        write_to_log("Started running video")
+        phase = "video_test"
+        threads = []
+        for monitor in monitors:
+            thr = threading.Thread(target=monitor.start_monitoring, args=(self.paramdict, phase, self.paramdict["session"]))
+            thr.deamon = True
+            thr.do_run = True
+            thr.start()
+            threads.append(thr)
+        start_time = 0
+        frame_pred = []
+        layer_name = ""
+        suggest_bb = False
+        if "suggest_bb" in self.paramdict and "layer_name" in self.paramdict and self.paramdict["suggest_bb"]:
+            suggest_bb = True
+            cams = []
+            heatmaps = []
+            bbs = []
+            modeltype = self.paramdict["model"]
+            layer_name = self.paramdict["layer_name"]
+            frame_dims = self.paramdict["imagedims"]
+            num_classes = self.paramdict["nb_classes"]
+            if layer_name == "":
+                nb_lyr = 0
+                lastconv = ""
+                for l in net.model.layers:
+                    config = l.get_config()
+                    nb_lyr += 1
+                    if "conv" in config["name"]:
+                        lastconv = config["name"]
+                        #print(config["name"], " <-------- Last Convolutional Layer")
+                    #else:
+                    #    print(config["name"])
+                layer_name = lastconv
+                print(layer_name, ", ", nb_lyr)
+        preview_video = False
+        if "preview_video" in self.paramdict and self.paramdict["preview_video"]:
+            preview_video = True
+            import matplotlib.pyplot as plt
+            from matplotlib import gridspec
+            video_window = None
+            cam_window = None
+            heatmap_window = None
+            detection_window = None
+        tensors = []
+        count = 0
+        bb_count = 0
+        det_count = 0
+        frameskip = 0 # Number of frames to skip for CAM/Heatmap/Detection
+        K.set_learning_phase(0)
+        for frame in videogen:
+            if count == 1:
+                start_time = int((round(time.time() * 1000)))
+            frame = cv2.resize(frame, (self.paramdict["imagedims"][0], self.paramdict["imagedims"][1]))
+            if preview_video:
+                if video_window is None:
+                    video_window = plt.subplot2grid((2, 3), (0, 0))
+                    video_window.set_title('Video feed')
+                    video_window = plt.imshow(frame,interpolation='nearest')
+                    detection_window = plt.subplot2grid((2, 3), (1, 0), colspan=3)
+                    plt.ion()
+                else:
+                    video_window.set_data(frame)
+                plt.pause(.1)
+            img_tensor = kimage.img_to_array(frame)  # (height, width, channels)
+            img_tensor = np.expand_dims(img_tensor, axis=0)
+            img_tensor /= 255.
+            tensors.append(img_tensor)
+            if tensorrt:
+                frame_pred.append(net.my_predict(img_tensor))
+            else:
+                frame_pred.append(net.model.predict(img_tensor)[0])
+            if preview_video and det_count == frameskip:
+                det_count = 0
+                if detection_window is None:
+                    x = np.arange(0,len(frame_pred),1)
+                    detection_window = plt.subplot2grid((2, 3), (1, 0), colspan=3)
+                    detection_window = plt.plot(x,frame_pred)
+                else:
+                    x = np.arange(0,len(frame_pred),1)
+                    detection_window = plt.subplot2grid((2, 3), (1, 0), colspan=3)
+                    detection_window = plt.plot(x,frame_pred)
+                #plt.pause(.1)
+            else:
+                det_count += 1
+            if suggest_bb and not tensorrt:
+                if num_classes == 2 and frame_pred[count][1] > 0.5 and bb_count == frameskip:
+                    bb_count = 0
+                    cam, heatmap = gradcam.process_frame(img_tensor, net.model, modeltype, 1, layer_name, frame_dims, num_classes)
+                    cams.append(cam)
+                    heatmaps.append(heatmap)
+                    if preview_video:
+                        #cv2.imshow("CAM Preview",cam)
+                        #cv2.waitKey(1)
+                        #cv2.imshow("Heatmap Preview",heatmap)
+                        #cv2.waitKey(1)
+                        if cam_window is None:
+                            cam_window = plt.subplot2grid((2, 3), (0, 1))
+                            cam_window.set_title('CAM')
+                            cam_window = plt.imshow(cam,interpolation='nearest',cmap='viridis')
+                        else:
+                            cam_window.set_data(cam)
+                            cam_window.autoscale()
+                        if heatmap_window is None:
+                            heatmap_window = plt.subplot2grid((2, 3), (0, 2))
+                            heatmap_window.set_title('Heatmap')
+                            heatmap_window = plt.imshow(heatmap,interpolation='nearest', cmap='viridis')
+                        else:
+                            heatmap_window.set_data(heatmap)
+                            cam_window.autoscale()
+                        plt.pause(.1)
+                elif frame_pred[count][1] > 0.5:
+                    bb_count += 1
+            count += 1
+        plt.ioff()
+        plt.tight_layout()
+        plt.show()
+        end_time = int(round(time.time() * 1000))
+        time_elapsed = end_time - start_time
+        fps = (len(frame_pred)-1)/(time_elapsed/1000)
+
+        start_time_fast = int((round(time.time() * 1000)))
+        frame_pred_fast = []
+        count_fast = 0
+        for tensor in tensors:
+            if tensorrt:
+                frame_pred_fast.append(net.my_predict(tensor))
+            else:
+                frame_pred_fast.append(net.model.predict(tensor)[0])
+            count += 1
+        end_time_fast = int(round(time.time() * 1000))
+        time_elapsed_fast = end_time_fast - start_time_fast
+        fps_fast = (len(frame_pred_fast)-1)/(time_elapsed_fast/1000)
+        #print(frame_pred)
+        storage_dict = {}
+        storage_dict["predictions"] = frame_pred
+        storage_dict["video"] = self.paramdict["video_filepath"]
+        storage_dict["num_frames"] = len(frame_pred)
+        storage_dict["fps"] = fps
+        storage_dict["fps_fast"] = fps_fast
+        storage_dict["frame_dims"] = self.paramdict["imagedims"]
+        storage_dict["nb_classes"] = self.paramdict["nb_classes"]
+        storage_dict["tensorrt"] = self.paramdict["tensorrt"]
+        storage_dict["session"] = self.paramdict["session"]
+        storage_dict["network_type"] = self.paramdict["network_type"]
+        storage_dict["model_precision"] = self.paramdict["model_precision"]
+        storage_dict["model"] = self.paramdict["model"]
+        storage_dict["dataset"] = self.paramdict["dataset"]
+        storage_dict["class_indices"] = net.class_indices
+        self.save_report_dict(storage_dict,"data_video_test.json")
+        for t in threads:
+            t.do_run = False
+        if verbose_level == 1:
+            print("************ Finished running video ************")
+            print("Number of Frames: " + str(len(frame_pred)) + " | FPS: " + str(fps) + " | FPS on tensors: " + str(fps_fast))
+        write_to_log("Finished running video")
+        write_to_log("Number of Frames: " + str(len(frame_pred)) + " | FPS: " + str(fps) + " | FPS on tensors: " + str(fps_fast))
+
     def sklearn_score(self, test_predictions, true_classes, class_labels):
         predicted_classes = np.argmax(test_predictions,axis=1)
         acc = metrics.accuracy_score(true_classes, predicted_classes)
@@ -912,6 +1016,12 @@ def ensure_session_storage(session):
     os.makedirs(directory + "tpmon/figures/", exist_ok=True)
     os.makedirs(directory + "kerasmon/figures/", exist_ok=True)
 
+def ensure_main_storage():
+    directory = os.path.dirname(os.path.abspath(__file__))
+    os.makedirs(directory + "/param_files/broken/", exist_ok=True)
+    os.makedirs(directory + "/param_files/completed/", exist_ok=True)
+    os.makedirs(directory + "/logs/", exist_ok=True)
+
 def write_to_log(line):
     to_print = "\n" + datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S') + " ** " + line
     with open(os.path.dirname(os.path.abspath(__file__)) + "/logs/" + "log_" + datetime.datetime.now().date().strftime('%Y-%m-%d') + ".txt", "a") as myfile:
@@ -926,6 +1036,7 @@ if __name__ == '__main__':
     if not args_d["param_keyword"]:
         args_d["param_keyword"] = ""
     # app.run()
+    ensure_main_storage()
     paramdir = os.path.dirname(os.path.abspath(__file__)) + "/param_files/"
     for directory, subdirectories, files in os.walk(paramdir, onerror=walkerror):
         for file in sorted(files):
@@ -937,6 +1048,10 @@ if __name__ == '__main__':
                 except ValueError:  # includes simplejson.decoder.JSONDecodeError
                     print("Could not open file\n",file,"\nIt is probably formatted incorrectly")
                     write_to_log("Could not open file\n" + str(file) + "\nIt is probably formatted incorrectly")
+                    continue
+                except FileNotFoundError:
+                    print("File not found:\n" +str(file))
+                    write_to_log("File not found:\n" +str(file))
                     continue
                 session = paramdict["session"]
                 rootdir = os.path.dirname(os.path.abspath(__file__)) + "/metrics/storage/sessions/" + session
@@ -955,7 +1070,9 @@ if __name__ == '__main__':
                 try:
                     print("Started processing ", file)
                     write_to_log("Started processing " + str(file))
-                    if paramdict["setup"] or paramdict["train"] or paramdict["fine_tune"] or paramdict["test"]:
+                    if paramdict["setup"] or paramdict["train"] \
+                    or paramdict["fine_tune"] or paramdict["test"] \
+                    or paramdict["save_as_uff"] or paramdict["run_video"]:
                         paramcpy = paramdict.copy()
                         paramcpy["binary_test"] = False
                         if "binary_val_test" in paramcpy:
@@ -973,7 +1090,8 @@ if __name__ == '__main__':
                     if paramdict["save_figures"] or paramdict["show_figures"]:
                         handler = NetworkHandler(paramdict)
                         handler.plot_results(rootdir)
-                    os.rename(paramdir + file, paramdir + "completed/" + file)
+                        handler = None
+                    # os.rename(paramdir + file, paramdir + "completed/" + file)
                     print("Successfully processed ", file)
                     write_to_log("Successfully processed " + str(file))
                 except:
@@ -981,6 +1099,6 @@ if __name__ == '__main__':
                     tb = traceback.format_exc()
                     print("Error: ", str(e), " while processing ", file, tb)
                     write_to_log("Error: " + str(e) + " while processing " + str(file) + str(tb))
-                    os.rename(paramdir + file, paramdir + "broken/" + file)
+                    # os.rename(paramdir + file, paramdir + "broken/" + file)
             else:
                 print("Skipping file ", file, "due to lack of keyword", args_d["param_keyword"][0])

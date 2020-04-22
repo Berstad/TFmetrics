@@ -80,7 +80,7 @@ class KerasNet:
     calls = []
     train_class_weights = None
 
-    def __init__(self,paramdict_in,calls=[],classname = ""):
+    def __init__(self,paramdict_in,calls=[],classname = "",load_model_only=False):
         #the base model
         if paramdict_in["verbose_level"] == 1:
             self.verbose = True
@@ -100,6 +100,8 @@ class KerasNet:
             # Top Model Block
             x = self.base_model.output
             x = GlobalAveragePooling2D()(x)
+            # let's add a fully-connected layer
+            x = Dense(1024, activation='relu')(x)
             self.predictions = Dense(self.paramdict['nb_classes'], activation=self.paramdict['activation'])(x)
 
             # add your top layer block to your base model
@@ -119,6 +121,8 @@ class KerasNet:
                 self.test_data_dir = self.paramdict["test_data_dir"]
                 self.model_dir = os.path.dirname(os.path.abspath(__file__)) \
                                  + self.paramdict["model_dir"] + sessionname + "/"
+            if load_model_only:
+                self.my_load_model(self.model_dir  + "model.hdf5")
             if self.verbose:
                 print("Initilialization complete")
             self.setup_completed = True
@@ -127,52 +131,148 @@ class KerasNet:
             tb = traceback.format_exc()
             print("Error: ", str(e), " while processing ", tb)
 
+    # TODO: Find a better way to do this, this is terrible.
     def optselect(self):
-        if self.verbose:
-            print("Setting training optimizer to: " + self.paramdict["train_optimizer"])
-        if self.paramdict["train_optimizer"] == "nadam":
-            self.train_optimizer = optimizers.Nadam(lr=self.paramdict["train_learn_rate"],
-                                                    beta_1=self.paramdict["nadam_beta_1"],
-                                                    beta_2=self.paramdict["nadam_beta_2"])
-        elif self.paramdict["train_optimizer"] == "sgd":
-            self.train_optimizer = optimizers.SGD(lr=self.paramdict["train_learn_rate"],
-                                                  momentum=self.paramdict["momentum"], nesterov=True)
-        elif self.paramdict["train_optimizer"] == "rmsprop":
-            self.train_optimizer = optimizers.RMSprop(lr=self.paramdict["train_learn_rate"])
-        elif self.paramdict["train_optimizer"] == "adagrad":
-            self.train_optimizer = optimizers.Adagrad(lr=self.paramdict["train_learn_rate"])
-        elif self.paramdict["train_optimizer"] == "adadelta":
-            self.train_optimizer = optimizers.Adadelta(lr=self.paramdict["train_learn_rate"])
-        elif self.paramdict["train_optimizer"] == "adam":
-            self.train_optimizer = optimizers.Adam(lr=self.paramdict["train_learn_rate"])
-        elif self.paramdict["train_optimizer"] == "adamax":
-            self.train_optimizer = optimizers.Adamax(lr=self.paramdict["train_learn_rate"])
-        else:
-            self.train_optimizer = optimizers.Nadam()
+        try:
+            arguments = open_json("/dicts/","keras_defaults.json")
+            if self.verbose:
+                print("Setting up parameters for training optimizer")
+            if "train_lr" in self.paramdict:
+                arguments[self.paramdict["train_optimizer"]]["lr"] = self.paramdict["train_lr"]
+            if "train_beta_1" in self.paramdict:
+                arguments[self.paramdict["train_optimizer"]]["beta_1"] = self.paramdict["train_beta_1"]
+            if "train_beta_2" in self.paramdict:
+                arguments[self.paramdict["train_optimizer"]]["beta_2"] = self.paramdict["train_beta_2"]
+            if "train_momentum" in self.paramdict:
+                arguments[self.paramdict["train_optimizer"]]["momentum"] = self.paramdict["train_momentum"]
+            if "train_nesterov" in self.paramdict:
+                arguments[self.paramdict["train_optimizer"]]["nesterov"] = self.paramdict["train_nesterov"]
+            if "train_decay" in self.paramdict:
+                arguments[self.paramdict["train_optimizer"]]["decay"] = self.paramdict["train_decay"]
+            if "train_schedule_decay" in self.paramdict:
+                arguments[self.paramdict["train_optimizer"]]["schedule_decay"] = self.paramdict["train_schedule_decay"]
+            if "train_epsilon" in self.paramdict:
+                arguments[self.paramdict["train_optimizer"]]["epsilon"] = self.paramdict["train_epsilon"]
+            if "train_amsgrad" in self.paramdict:
+                arguments[self.paramdict["train_optimizer"]]["amsgrad"] = self.paramdict["train_amsgrad"]
+            if "train_rho" in self.paramdict:
+                arguments[self.paramdict["train_optimizer"]]["rho"] = self.paramdict["train_rho"]
 
-        if self.verbose:
-            print("Setting fine tuning optimizer to: " + self.paramdict["fine_tune_optimizer"])
-        if self.paramdict["fine_tune_optimizer"] == "nadam":
-            self.fine_tune_optimizer = optimizers.Nadam(lr=self.paramdict["fine_tune_learn_rate"],
-                                                        beta_1=self.paramdict["nadam_beta_1"],
-                                                        beta_2=self.paramdict["nadam_beta_2"])
-        elif self.paramdict["fine_tune_optimizer"] == "sgd":
-            self.fine_tune_optimizer = optimizers.SGD(lr=self.paramdict["fine_tune_learn_rate"],
-                                                  momentum=self.paramdict["momentum"], nesterov=True)
-        elif self.paramdict["fine_tune_optimizer"] == "rmsprop":
-            self.fine_tune_optimizer = optimizers.RMSprop(lr=self.paramdict["fine_tune_learn_rate"])
-        elif self.paramdict["fine_tune_optimizer"] == "adagrad":
-            self.fine_tune_optimizer = optimizers.Adagrad(lr=self.paramdict["fine_tune_learn_rate"])
-        elif self.paramdict["fine_tune_optimizer"] == "adadelta":
-            self.fine_tune_optimizer = optimizers.Adadelta(lr=self.paramdict["fine_tune_learn_rate"])
-        elif self.paramdict["fine_tune_optimizer"] == "adam":
-            self.fine_tune_optimizer = optimizers.Adam(lr=self.paramdict["fine_tune_learn_rate"])
-        elif self.paramdict["fine_tune_optimizer"] == "adamax":
-            self.fine_tune_optimizer = optimizers.Adamax(lr=self.paramdict["fine_tune_learn_rate"])
-        else:
-            self.fine_tune_optimizer = optimizers.Nadam()
-        if self.verbose:
-            print("Optimizers set!")
+            if self.verbose:
+                print("Setting training optimizer to: " + self.paramdict["train_optimizer"])
+            if self.paramdict["train_optimizer"] == "nadam":
+                self.train_optimizer = optimizers.Nadam(lr=arguments["nadam"]["lr"],
+                                                        beta_1=arguments["nadam"]["beta_1"],
+                                                        beta_2=arguments["nadam"]["beta_2"],
+                                                        epsilon=arguments["nadam"]["epsilon"],
+                                                        schedule_decay=arguments["nadam"]["schedule_decay"])
+            elif self.paramdict["train_optimizer"] == "sgd":
+                self.train_optimizer = optimizers.SGD(lr=arguments["sgd"]["lr"],
+                                                      momentum=arguments["sgd"]["momentum"],
+                                                      decay=arguments["sgd"]["decay"],
+                                                      nesterov=arguments["sgd"]["nesterov"])
+            elif self.paramdict["train_optimizer"] == "rmsprop":
+                self.train_optimizer = optimizers.RMSprop(lr=arguments["rmsprop"]["lr"],
+                                                          rho=arguments["rmsprop"]["rho"],
+                                                          epsilon=arguments["rmsprop"]["epsilon"],
+                                                          decay=arguments["rmsprop"]["decay"])
+            elif self.paramdict["train_optimizer"] == "adagrad":
+                self.train_optimizer = optimizers.Adagrad(lr=arguments["adagrad"]["lr"],
+                                                          epsilon=arguments["adagrad"]["epsilon"],
+                                                          decay=arguments["adagrad"]["decay"])
+            elif self.paramdict["train_optimizer"] == "adadelta":
+                self.train_optimizer = optimizers.Adadelta(lr=arguments["adadelta"]["lr"],
+                                                           rho=arguments["adadelta"]["rho"],
+                                                           epsilon=arguments["adadelta"]["epsilon"],
+                                                           decay=arguments["adadelta"]["decay"])
+            elif self.paramdict["train_optimizer"] == "adam":
+                self.train_optimizer = optimizers.Adam(lr=arguments["adam"]["lr"],
+                                                       beta_1=arguments["adam"]["beta_1"],
+                                                       beta_2=arguments["adam"]["beta_2"],
+                                                       epsilon=arguments["adam"]["epsilon"],
+                                                       decay=arguments["adam"]["decay"],
+                                                       amsgrad=arguments["adam"]["amsgrad"])
+            elif self.paramdict["train_optimizer"] == "adamax":
+                self.train_optimizer = optimizers.Adamax(lr=arguments["adamax"]["lr"],
+                                                         beta_1=arguments["adamax"]["beta_1"],
+                                                         beta_2=arguments["adamax"]["beta_2"],
+                                                         epsilon=arguments["adamax"]["epsilon"],
+                                                         decay=arguments["adamax"]["decay"])
+            else:
+                self.train_optimizer = optimizers.Nadam()
+
+            arguments = open_json("/dicts/","keras_defaults.json")
+            if self.verbose:
+                print("Setting up parameters for fine-tuning optimizer")
+            if "fine_tune_lr" in self.paramdict:
+                arguments[self.paramdict["fine_tune_optimizer"]]["lr"] = self.paramdict["fine_tune_lr"]
+            if "fine_tune_beta_1" in self.paramdict:
+                arguments[self.paramdict["fine_tune_optimizer"]]["beta_1"] = self.paramdict["fine_tune_beta_1"]
+            if "fine_tune_beta_2" in self.paramdict:
+                arguments[self.paramdict["fine_tune_optimizer"]]["beta_2"] = self.paramdict["fine_tune_beta_2"]
+            if "fine_tune_momentum" in self.paramdict:
+                arguments[self.paramdict["fine_tune_optimizer"]]["momentum"] = self.paramdict["fine_tune_momentum"]
+            if "fine_tune_nesterov" in self.paramdict:
+                arguments[self.paramdict["fine_tune_optimizer"]]["nesterov"] = self.paramdict["fine_tune_nesterov"]
+            if "fine_tune_decay" in self.paramdict:
+                arguments[self.paramdict["fine_tune_optimizer"]]["decay"] = self.paramdict["fine_tune_decay"]
+            if "fine_tune_schedule_decay" in self.paramdict:
+                arguments[self.paramdict["fine_tune_optimizer"]]["schedule_decay"] = self.paramdict["fine_tune_schedule_decay"]
+            if "fine_tune_epsilon" in self.paramdict:
+                arguments[self.paramdict["fine_tune_optimizer"]]["epsilon"] = self.paramdict["fine_tune_epsilon"]
+            if "fine_tune_amsgrad" in self.paramdict:
+                arguments[self.paramdict["fine_tune_optimizer"]]["amsgrad"] = self.paramdict["fine_tune_amsgrad"]
+            if "fine_tune_rho" in self.paramdict:
+                arguments[self.paramdict["fine_tune_optimizer"]]["rho"] = self.paramdict["fine_tune_rho"]
+
+            if self.verbose:
+                print("Setting fine tuning optimizer to: " + self.paramdict["fine_tune_optimizer"])
+            if self.paramdict["fine_tune_optimizer"] == "nadam":
+                self.fine_tune_optimizer = optimizers.Nadam(lr=arguments["nadam"]["lr"],
+                                                            beta_1=arguments["nadam"]["beta_1"],
+                                                            beta_2=arguments["nadam"]["beta_2"],
+                                                            epsilon=arguments["nadam"]["epsilon"],
+                                                            schedule_decay=arguments["nadam"]["schedule_decay"])
+            elif self.paramdict["fine_tune_optimizer"] == "sgd":
+                self.fine_tune_optimizer = optimizers.SGD(lr=arguments["sgd"]["lr"],
+                                                      momentum=arguments["sgd"]["momentum"],
+                                                      decay=arguments["sgd"]["decay"],
+                                                      nesterov=arguments["sgd"]["nesterov"])
+            elif self.paramdict["fine_tune_optimizer"] == "rmsprop":
+                self.fine_tune_optimizer = optimizers.RMSprop(lr=arguments["rmsprop"]["lr"],
+                                                          rho=arguments["rmsprop"]["rho"],
+                                                          epsilon=arguments["rmsprop"]["epsilon"],
+                                                          decay=arguments["rmsprop"]["decay"])
+            elif self.paramdict["fine_tune_optimizer"] == "adagrad":
+                self.fine_tune_optimizer = optimizers.Adagrad(lr=arguments["adagrad"]["lr"],
+                                                          epsilon=arguments["adagrad"]["epsilon"],
+                                                          decay=arguments["adagrad"]["decay"])
+            elif self.paramdict["fine_tune_optimizer"] == "adadelta":
+                self.fine_tune_optimizer = optimizers.Adadelta(lr=arguments["adadelta"]["lr"],
+                                                           rho=arguments["adadelta"]["rho"],
+                                                           epsilon=arguments["adadelta"]["epsilon"],
+                                                           decay=arguments["adadelta"]["decay"])
+            elif self.paramdict["fine_tune_optimizer"] == "adam":
+                self.fine_tune_optimizer = optimizers.Adam(lr=arguments["adam"]["lr"],
+                                                           beta_1=arguments["adam"]["beta_1"],
+                                                           beta_2=arguments["adam"]["beta_2"],
+                                                           epsilon=arguments["adam"]["epsilon"],
+                                                           decay=arguments["adam"]["decay"],
+                                                           amsgrad=arguments["adam"]["amsgrad"])
+            elif self.paramdict["fine_tune_optimizer"] == "adamax":
+                self.fine_tune_optimizer = optimizers.Adamax(lr=arguments["adamax"]["lr"],
+                                                             beta_1=arguments["adamax"]["beta_1"],
+                                                             beta_2=arguments["adamax"]["beta_2"],
+                                                             epsilon=arguments["adamax"]["epsilon"],
+                                                             decay=arguments["adamax"]["decay"])
+            else:
+                self.fine_tune_optimizer = optimizers.Nadam()
+            if self.verbose:
+                print("Optimizers set!")
+        except NameError as error:
+            # Output expected NameErrors.
+            print(error)
+
 
     def modelselect(self):
         if self.verbose:
@@ -230,8 +330,8 @@ class KerasNet:
             print("Model selected!")
 
     def my_load_model(self, path):
-        with CustomObjectScope({'relu6': keras.applications.mobilenet.relu6,'DepthwiseConv2D': keras.applications.mobilenet.DepthwiseConv2D}):
-            self.model = load_model(path)
+        #with CustomObjectScope({'relu6': keras.applications.mobilenet.relu6,'DepthwiseConv2D': keras.applications.mobilenet.DepthwiseConv2D}):
+        self.model = load_model(path)
         if self.verbose:
             print("Model loaded!")
 
@@ -241,9 +341,19 @@ class KerasNet:
             print("Model saved!")
 
     def load_model_weights(self, path):
+        if self.verbose:
+            print("Trying to load weights for current model with "
+                    + str(self.count_weight_layers()) + " weight layers")
         self.model.load_weights(path)
         if self.verbose:
             print("Model weights loaded!")
+        if "model_precision" in self.paramdict:
+            if self.paramdict["model_precision"] == "full":
+                pass
+            elif self.paramdict["model_precision"] == "half":
+                pass
+            elif self.paramdict["model_precision"] == "int8":
+                pass
 
     # Should clear the session and free memory
     def clear_session(self):
@@ -272,13 +382,24 @@ class KerasNet:
         # for i, layer in enumerate(model.layers):
         #     print(i, layer.name)
 
+    def freeze_base_model(self):
+        for layer in self.base_model.layers:
+            layer.trainable = False
+
+    def count_weight_layers(self):
+        filtered_layers = []
+        for layer in self.model.layers:
+            weights = layer.weights
+            if weights:
+                filtered_layers.append(layer)
+        return len(filtered_layers)
+
+
     def gen_data(self,save_preview = False):
         # first: train only the top layers (which were randomly initialized)
         # i.e. freeze all layers of the based model that is already pre-trained.
         if self.verbose:
             print("Generating data")
-        for layer in self.base_model.layers:
-            layer.trainable = False
         self.built_ins = ["cifar10","cifar100","mnist"]
 
         if not any(x in self.paramdict["dataset"] for x in self.built_ins):
@@ -300,6 +421,7 @@ class KerasNet:
                                                                           class_mode='categorical')
             self.train_class_weights = self.get_class_weights(self.train_generator.classes)
             self.classes = list(self.train_generator.class_indices.keys())
+            self.class_indices = self.train_generator.class_indices
 
             self.validation_generator = self.validation_datagen.flow_from_directory(self.validation_data_dir,
                                                                                     shuffle=False,
@@ -434,7 +556,7 @@ class KerasNet:
         del self.model
 
     def save_model_vis(self, path, filename):
-        plot_model(self.model, to_file=path + filename, show_shapes=True, show_layer_numbers=True)
+        plot_model(self.model, to_file=path + filename, show_shapes=True)#, show_layer_numbers=True)
 
     def test(self,testmode="testdatagen"):
         if self.verbose:
@@ -458,8 +580,43 @@ class KerasNet:
         else:
             print("Invalid testmode!")
 
-    def setup_binary_test(self, test_data_generator):
-        self.test_data_generator = test_data_generator
+    def make_binary_test_generator(self,binary_test_data_dir):
+        self.test_datagen = ImageDataGenerator(rescale=1. / 255)
+        self.test_data_generator = self.test_datagen.flow_from_directory(binary_test_data_dir,
+                                                                         target_size=(self.paramdict['imagedims'][0],
+                                                                                      self.paramdict['imagedims'][1]),
+                                                                         batch_size=self.paramdict['batch_size'],
+                                                                         class_mode='categorical',
+                                                                         shuffle=False)
+        test_true_classes = self.test_data_generator.classes
+        class_labels = list(self.test_data_generator.class_indices.keys())
+        return test_true_classes, class_labels
+
+    # Save the current model to UFF format. Very useful for TensorRT!
+    def save_as_uff(self):
+        try:
+            import tensorflow as tf
+            import uff
+            import tensorrt as trt
+        except ImportError as err:
+            raise ImportError("""ERROR: Failed to import module ({})
+        Please make sure you have the TensorRT Library installed
+        and accessible in your LD_LIBRARY_PATH""".format(err))
+        graph_def = K.get_session().graph.as_graph_def()
+        sess = K.get_session()
+        model_output = self.model.output.name.strip(':0')
+        frozen_graph = tf.graph_util.convert_variables_to_constants(sess, graph_def, [model_output])
+        frozen_graph = tf.graph_util.remove_training_nodes(frozen_graph)
+        uff_model = uff.from_tensorflow(frozen_graph, [model_output])
+        outpath = self.model_dir + "graph.uff"
+        with open(outpath, 'wb') as dump:
+            dump.write(uff_model)
+
+    def init_threading(self):
+        self.model._make_predict_function() # Initialize before threading
+
+    def my_predict(self,X):
+        return model.predict(X)
 
 def save_json(obj, path,name):
     os.makedirs(path, exist_ok=True)
@@ -468,10 +625,11 @@ def save_json(obj, path,name):
 
 
 def open_json(path, name):
+    print("Trying to open JSON from KerasNet: " + path + name)
     dir = os.path.dirname(os.path.abspath(__file__)) + path
     with open(dir + name, 'r') as f:
-        j_string = json.loads(f)
-    return j_string
+        ret_dict = json.loads(f.read())
+    return ret_dict
 
 if __name__ == '__main__':
     print("This program is not meant to be run as is, run using server.py as wrapper")
