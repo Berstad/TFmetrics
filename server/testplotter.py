@@ -98,7 +98,7 @@ def plot_json(combine, figname, filepath, verbose, gpu_specsdir, sys_specsdir, p
                 mets[0].append((metrics[str(i)][str(j)]["time"]-begin)/1000)
             except KeyError:
                 pass
-    met_index = 1     
+    met_index = 1
     for metric in metrics["0"]["0"].keys():
         if metric == "time":
             continue
@@ -269,7 +269,12 @@ def translate_mets(met_param):
 def plot_history(combine, figname, filepath, verbose, library, save=True, show=True, sessionid="testing"):
     plt.rcParams.update({'font.size': 14})
     with open(filepath) as json_data:
-        metrics = json.load(json_data)
+        data_string = json_data.read()
+        print(data_string)
+        data_string = data_string.replace("\"", "")
+        data_string = data_string.replace("\'", "\"")
+        print(data_string)
+        metrics = json.loads(data_string)
     with open(os.path.dirname(os.path.abspath(__file__)) + "/metrics/dicts/units.json") as json_data:
         units = json.load(json_data)
     met_index = 0
@@ -417,14 +422,14 @@ def plot_analysis(combine, test_name, y_true, y_pred, y_proba,
         plt.suptitle(test_name)
         plt.tight_layout(rect=[0, 0.03, 1, 0.95])
         save_show(plt,library,sessionid,figname,show,save,True, analysis = True)
- 
- 
+
+
 
 if __name__ == '__main__':
     pass
     network_name = "kvasir"
     type = "multiclass"
-    session = "batchsize-64_val-acc_val-loss"
+    session = "augere-test-session"
     save_figures = True
     show_figures = True
     rootdir = "/metrics/storage/sessions/" + session

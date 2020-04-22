@@ -15,6 +15,7 @@ from keras.applications.resnet50 import ResNet50
 from keras.applications.vgg16 import VGG16
 from keras.applications.vgg19 import VGG19
 from keras.applications.mobilenet import MobileNet
+from keras.applications.mobilenet_v2 import MobileNetV2
 from keras.applications.densenet import DenseNet121, DenseNet169, DenseNet201
 from keras.applications.nasnet import NASNetLarge, NASNetMobile
 from keras.models import Model, load_model
@@ -26,7 +27,7 @@ from keras.datasets import cifar10, cifar100, mnist
 from keras import backend as K
 from collections import Counter
 import os
-from keras.callbacks import EarlyStopping
+from keras.callbacks import EarlyStopping, ReduceLROnPlateau
 import keras
 import sys
 import time
@@ -35,7 +36,11 @@ import importlib
 import json
 from keras.utils.vis_utils import plot_model
 from keras.utils.generic_utils import CustomObjectScope
-
+import traceback
+import tensorflow as tf
+physical_devices = tf.config.experimental.list_physical_devices('GPU')
+print("physical_devices-------------", len(physical_devices))
+tf.config.experimental.set_memory_growth(physical_devices[0], True)
 
 # From https://stackoverflow.com/questions/43178668/record-the-computation-time-for-each-epoch-in-keras-during-model-fit
 class TimeHistory(keras.callbacks.Callback):
@@ -109,11 +114,9 @@ class KerasNet:
                 self.model_dir = os.path.dirname(os.path.abspath(__file__)) \
                                  + self.paramdict["model_dir"] + sessionname + "/" + self.classname + "/"
             else:
-                self.train_data_dir = os.path.dirname(os.path.abspath(__file__)) \
-                                      + self.paramdict["train_data_dir"]
-                self.validation_data_dir = os.path.dirname(os.path.abspath(__file__)) \
-                                           + self.paramdict["validation_data_dir"]
-                self.test_data_dir = os.path.dirname(os.path.abspath(__file__)) + self.paramdict["test_data_dir"]
+                self.train_data_dir = self.paramdict["train_data_dir"]
+                self.validation_data_dir = self.paramdict["validation_data_dir"]
+                self.test_data_dir = self.paramdict["test_data_dir"]
                 self.model_dir = os.path.dirname(os.path.abspath(__file__)) \
                                  + self.paramdict["model_dir"] + sessionname + "/"
             if self.verbose:
@@ -121,7 +124,8 @@ class KerasNet:
             self.setup_completed = True
         except:
             e = sys.exc_info()[0]
-            print("Error: ", e)
+            tb = traceback.format_exc()
+            print("Error: ", str(e), " while processing ", tb)
 
     def optselect(self):
         if self.verbose:
@@ -131,7 +135,7 @@ class KerasNet:
                                                     beta_1=self.paramdict["nadam_beta_1"],
                                                     beta_2=self.paramdict["nadam_beta_2"])
         elif self.paramdict["train_optimizer"] == "sgd":
-            self.train_optimizer = optimizers.SGD(lr=self.paramdict["train_learn_rate"], 
+            self.train_optimizer = optimizers.SGD(lr=self.paramdict["train_learn_rate"],
                                                   momentum=self.paramdict["momentum"], nesterov=True)
         elif self.paramdict["train_optimizer"] == "rmsprop":
             self.train_optimizer = optimizers.RMSprop(lr=self.paramdict["train_learn_rate"])
@@ -195,6 +199,9 @@ class KerasNet:
                                     weights='imagenet', include_top=False)
         elif self.paramdict["model"] == "mobilenet":
             self.base_model = MobileNet(input_shape=(self.paramdict['imagedims'][0], self.paramdict['imagedims'][1], 3),
+                                        weights='imagenet', include_top=False)
+        elif self.paramdict["model"] == "mobilenetv2":
+            self.base_model = MobileNetV2(input_shape=(self.paramdict['imagedims'][0], self.paramdict['imagedims'][1], 3),
                                         weights='imagenet', include_top=False)
         elif self.paramdict["model"] == "densenet121":
             self.base_model = DenseNet121(input_shape=(self.paramdict['imagedims'][0],
@@ -288,7 +295,7 @@ class KerasNet:
             self.train_generator = self.train_datagen.flow_from_directory(self.train_data_dir,
                                                                           shuffle=True,
                                                                           target_size=(self.paramdict['imagedims'][0],
-                                                                          self.paramdict['imagedims'][1]),
+                                                                                       self.paramdict['imagedims'][1]),
                                                                           batch_size=self.paramdict['batch_size'],
                                                                           class_mode='categorical')
             self.train_class_weights = self.get_class_weights(self.train_generator.classes)
@@ -300,7 +307,7 @@ class KerasNet:
                                                                                                  self.paramdict['imagedims'][1]),
                                                                                     batch_size=self.paramdict['batch_size'],
                                                                                     class_mode='categorical')
-            
+
             self.test_data_generator = self.test_datagen.flow_from_directory(self.test_data_dir,
                                                                          target_size=(self.paramdict['imagedims'][0],
                                                                                       self.paramdict['imagedims'][1]),
@@ -352,19 +359,27 @@ class KerasNet:
                            metrics=self.metrics)
 
         self.top_weights_path = os.path.join(self.model_dir, 'top_model_weights.hdf5')
-        self.callbacks_list = [
-            ModelCheckpoint(self.top_weights_path, monitor=self.paramdict['monitor_checkpoint'], verbose=1, save_best_only=True),
-            EarlyStopping(monitor=self.paramdict['monitor_stopping'], patience=self.paramdict['patience'], verbose=0),
-        ] + self.calls
+        self.callbacks_list = [] + self.calls
+        self.callbacks_list.append(ModelCheckpoint(self.top_weights_path, monitor=self.paramdict['monitor_checkpoint'], verbose=1, save_best_only=True))
+
+        if "reduce_lr_on_plateau" in self.paramdict and self.paramdict["reduce_lr_on_plateau"]:
+            self.callbacks_list.append(EarlyStopping(monitor=self.paramdict['monitor_stopping'],
+                                                     patience=self.paramdict['patience'],
+                                                     verbose=0,
+                                                     restore_best_weights=self.paramdict["restore_best_weights"]))
+        else:
+            self.callbacks_list.append(ReduceLROnPlateau(monitor=self.paramdict['monitor_stopping'],
+                                                     patience=self.paramdict['patience'],
+                                                     verbose=0,
+                                                     min_lr=self.paramdict["min_lr"]))
+
         save_json(self.model.to_json(), self.model_dir, "setup_model.json")
 
     def train(self):
          # Train Simple CNN
-         history =  self.model.fit_generator(self.train_generator,
-                                 steps_per_epoch=self.paramdict['nb_train_samples'] // self.paramdict['batch_size'],
+         history =  self.model.fit(self.train_generator,
                                  epochs=self.paramdict['nb_epoch'] / 5,
                                  validation_data=self.validation_generator,
-                                 validation_steps=self.paramdict['nb_validation_samples'] // self.paramdict['batch_size'],
                                  callbacks=self.callbacks_list,
                                  class_weight=self.train_class_weights)
          save_json(self.model.to_json(), self.model_dir, "train_model.json")
@@ -392,20 +407,26 @@ class KerasNet:
 
         # save weights of best training epoch: monitor either val_loss or val_acc
         self.final_weights_path = os.path.join(self.model_dir, 'model_weights.hdf5')
-        self.callbacks_list = [
-            ModelCheckpoint(self.final_weights_path, monitor=self.paramdict['monitor_checkpoint'], verbose=1, save_best_only=True),
-            EarlyStopping(monitor=self.paramdict['monitor_stopping'], patience=self.paramdict['patience'], verbose=0)
-        ] + self.calls
-        history = self.model.fit_generator(self.train_generator,
-                                steps_per_epoch=self.paramdict['nb_train_samples'] // self.paramdict['batch_size'],
+        self.callbacks_list = [] + self.calls
+        self.callbacks_list.append(ModelCheckpoint(self.final_weights_path, monitor=self.paramdict['monitor_checkpoint'], verbose=1, save_best_only=True))
+        if "reduce_lr_on_plateau" in self.paramdict and self.paramdict["reduce_lr_on_plateau"]:
+            self.callbacks_list.append(EarlyStopping(monitor=self.paramdict['monitor_stopping'],
+                                                     patience=self.paramdict['patience'],
+                                                     verbose=0,
+                                                     restore_best_weights=self.paramdict["restore_best_weights"]))
+        else:
+            self.callbacks_list.append(ReduceLROnPlateau(monitor=self.paramdict['monitor_stopping'],
+                                                     patience=self.paramdict['patience'],
+                                                     verbose=0,
+                                                     min_lr=self.paramdict["min_lr"]))
+        history = self.model.fit(self.train_generator,
                                 epochs=self.paramdict['nb_epoch'],
                                 validation_data=self.validation_generator,
-                                validation_steps=self.paramdict['nb_validation_samples'] // self.paramdict['batch_size'],
                                 callbacks=self.callbacks_list,
                                 class_weight=self.train_class_weights)
         save_json(self.model.to_json(),self.model_dir,"fine_tune_model.json")
         return history
-                       
+
     def set_classes(self,classes):
         self.classes = classes
 
